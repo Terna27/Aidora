@@ -122,14 +122,14 @@ export const ResponderLoginScreen: React.FC<ResponderLoginScreenProps> = ({
 
         {/* Demo Fast Tracks */}
         <View style={styles.demoBox}>
-          <Text style={styles.demoTitle}>⚡ One-Tap Sign In as Verified Driver:</Text>
+          <Text style={styles.demoTitle}>⚡ One-Tap Credentials (Simulated Development Only):</Text>
           <TouchableOpacity
             onPress={() => handleFillDemo('resp-201')}
             style={styles.demoItem}
             activeOpacity={0.8}
           >
             <Text style={styles.demoItemText}>
-              🏍️ Ibrahim Suleiman (Motorcycle • 08031112233)
+              🏍️ Ibrahim Suleiman (Motorcycle) [SIMULATED]
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -138,7 +138,7 @@ export const ResponderLoginScreen: React.FC<ResponderLoginScreenProps> = ({
             activeOpacity={0.8}
           >
             <Text style={styles.demoItemText}>
-              🚕 Emmanuel Osei (Taxi Driver • 08024445566)
+              🚕 Emmanuel Osei (Taxi Driver) [SIMULATED]
             </Text>
           </TouchableOpacity>
         </View>

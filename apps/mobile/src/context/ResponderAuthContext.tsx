@@ -97,6 +97,11 @@ export const ResponderAuthProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const loginAsDemo = async (responderId = 'resp-201') => {
+    if (process.env.EXPO_PUBLIC_USE_MOCK === 'false') {
+      throw new Error(
+        'Demo account fast-track is restricted to mock development mode and strictly unavailable in production.'
+      );
+    }
     const res = await serviceRegistry.responderAuthService.loginAsDemo(responderId);
     setResponder(res.responder);
     const avail = await serviceRegistry.responderJourneyService.getAvailability(res.responder.id);

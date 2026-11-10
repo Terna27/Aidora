@@ -6,12 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
-import { colors, spacing, borderRadius, typography } from '../../../theme';
+import { colors, spacing, borderRadius } from '../../../theme';
 import { Button } from '../../../components/common/Button';
 import { Card } from '../../../components/common/Card';
 import { StatusBadge } from '../../../components/common/StatusBadge';
-import { ConnectivityBanner } from '../../../components/common/ConnectivityBanner';
 import { SafetyBanner } from '../../../components/common/SafetyBanner';
 import { VERIFICATION_STATUS_METADATA } from '../../../types/responder';
 import { useResponderAuth } from '../../../context/ResponderAuthContext';
@@ -43,14 +43,26 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
   const [toggling, setToggling] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
 
   if (!responder) return null;
 
-  const verificationMeta = VERIFICATION_STATUS_METADATA[responder.verificationStatus];
+  const verificationMeta = VERIFICATION_STATUS_METADATA[responder.verificationStatus] || {
+    label: responder.verificationStatus,
+    badgeColor: '#D97706',
+    description: 'Document verification status.',
+  };
+
   const isOnline = availability === 'ONLINE';
+  const isVerified = responder.verificationStatus === 'VERIFIED';
 
   const handleToggle = async () => {
     setToggleError(null);
+    if (!isVerified) {
+      setToggleError('Document verification required before you can go online. Please check your verification checklist in Account.');
+      return;
+    }
+
     setToggling(true);
     try {
       await toggleAvailability();
@@ -74,57 +86,165 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
 
   return (
     <View style={styles.screen}>
-      <ConnectivityBanner isMockMode={true} />
+      {/* BACKGROUND CONCENTRIC RADAR RINGS RADIATING BEHIND DRIVER AVATAR */}
+      <View style={styles.radarContainer} pointerEvents="none">
+        <View style={[styles.radarRing, styles.radarRing4]} />
+        <View style={[styles.radarRing, styles.radarRing3]} />
+        <View style={[styles.radarRing, styles.radarRing2]} />
+        <View style={[styles.radarRing, styles.radarRing1]} />
+      </View>
 
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         {/* DRIVER WELCOME HEADER */}
-        <View style={styles.topHeader}>
-          <View style={styles.avatarWrapper}>
-            <Text style={styles.avatarEmoji}>
-              {responder.vehicle.vehicleType === 'MOTORCYCLE' ? '🏍️' : '🚕'}
-            </Text>
-          </View>
-
-          <View style={styles.headerInfo}>
-            <View style={styles.portalTagRow}>
-              <Text style={styles.portalTag}>RESPONDER PORTAL</Text>
-              <View
-                style={[
-                  styles.verificationMiniTag,
-                  { backgroundColor: verificationMeta.badgeColor + '20', borderColor: verificationMeta.badgeColor },
-                ]}
-              >
-                <Text style={[styles.verificationMiniText, { color: verificationMeta.badgeColor }]}>
-                  {responder.verificationStatus}
-                </Text>
-              </View>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            style={styles.profileSection}
+            onPress={onNavigateProfile}
+            activeOpacity={0.8}
+            accessibilityLabel="Driver Profile and Verification Status"
+          >
+            <View style={styles.avatarWrapper}>
+              <Text style={styles.avatarGlyph}>
+                {responder.vehicle.vehicleType === 'MOTORCYCLE' ? '🏍️' : '🚕'}
+              </Text>
             </View>
 
-            <Text style={styles.responderName}>{responder.fullName}</Text>
-            <Text style={styles.vehicleSubtitle}>
-              {responder.vehicle.makeModel} • {responder.vehicle.licensePlate}
-            </Text>
-          </View>
+            <View style={styles.headerInfo}>
+              <View style={styles.driverGreetingRow}>
+                <Text style={styles.greetingPrefix}>Driver </Text>
+                <Text style={styles.driverName} numberOfLines={1}>
+                  {responder.fullName.split(' ')[0]}
+                </Text>
+              </View>
 
-          <TouchableOpacity onPress={onNavigateProfile} style={styles.profileBadge} activeOpacity={0.7}>
-            <Text style={styles.profileBadgeText}>⚙️ Account</Text>
+              <View style={styles.badgesRow}>
+                {/* VERIFICATION BADGE PILL */}
+                <View
+                  style={[
+                    styles.verificationPill,
+                    {
+                      backgroundColor:
+                        responder.verificationStatus === 'VERIFIED'
+                          ? '#ECFDF5'
+                          : responder.verificationStatus === 'PENDING'
+                          ? '#FEF3C7'
+                          : '#FEE2E2',
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.verificationDot,
+                      {
+                        backgroundColor:
+                          responder.verificationStatus === 'VERIFIED'
+                            ? '#059669'
+                            : responder.verificationStatus === 'PENDING'
+                            ? '#D97706'
+                            : '#DC2626',
+                      },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.verificationText,
+                      {
+                        color:
+                          responder.verificationStatus === 'VERIFIED'
+                            ? '#059669'
+                            : responder.verificationStatus === 'PENDING'
+                            ? '#B45309'
+                            : '#DC2626',
+                      },
+                    ]}
+                  >
+                    {verificationMeta.label}
+                  </Text>
+                </View>
+
+                {/* VEHICLE TYPE PILL */}
+                <View style={styles.vehicleTypePill}>
+                  <Text style={styles.vehicleTypeText}>
+                    {responder.vehicle.vehicleType === 'MOTORCYCLE' ? 'Motorcycle' : 'Taxi'}
+                  </Text>
+                </View>
+              </View>
+            </View>
           </TouchableOpacity>
+
+          <View style={styles.headerActions}>
+            {/* NOTIFICATION BUTTON */}
+            <TouchableOpacity
+              style={styles.circleActionButton}
+              onPress={() => setShowNotificationModal(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Notifications"
+            >
+              <View style={styles.bellIconWrapper}>
+                <View style={styles.bellDome} />
+                <View style={styles.bellRim} />
+                <View style={styles.bellClapper} />
+              </View>
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>1</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* SETTINGS / PROFILE BUTTON */}
+            <TouchableOpacity
+              style={styles.circleActionButton}
+              onPress={onNavigateProfile}
+              activeOpacity={0.7}
+              accessibilityLabel="Account and Vehicle Settings"
+            >
+              <View style={styles.cogIconWrapper}>
+                <View style={styles.cogCenter} />
+                <View style={[styles.cogTooth, styles.cogToothV]} />
+                <View style={[styles.cogTooth, styles.cogToothH]} />
+              </View>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* VERIFICATION STATUS NOTICE (If not verified) */}
-        {responder.verificationStatus !== 'VERIFIED' ? (
+        {/* VERIFICATION STATUS NOTICE (If unverified/pending/suspended) */}
+        {!isVerified ? (
           <TouchableOpacity
             onPress={onNavigateProfile}
             activeOpacity={0.85}
-            style={styles.verificationNoticeCard}
+            style={[
+              styles.verificationNoticeCard,
+              responder.verificationStatus === 'SUSPENDED'
+                ? styles.noticeCardSuspended
+                : styles.noticeCardPending,
+            ]}
           >
-            <View style={styles.verificationHeader}>
-              <Text style={styles.verificationIcon}>⚠️</Text>
-              <Text style={styles.verificationTitle}>{verificationMeta.label}</Text>
+            <View style={styles.noticeHeader}>
+              <Text style={styles.noticeIcon}>
+                {responder.verificationStatus === 'SUSPENDED' ? '🚫' : '⏳'}
+              </Text>
+              <Text
+                style={[
+                  styles.noticeTitle,
+                  responder.verificationStatus === 'SUSPENDED'
+                    ? styles.noticeTitleSuspended
+                    : styles.noticeTitlePending,
+                ]}
+              >
+                {responder.verificationStatus === 'SUSPENDED'
+                  ? 'Account Under Administrative Review'
+                  : 'Document Verification Required'}
+              </Text>
             </View>
-            <Text style={styles.verificationDescription}>
-              {verificationMeta.description} Unverified responders cannot toggle online or receive real emergency requests. Tap to view requirements.
+            <Text style={styles.noticeBody}>
+              {responder.verificationStatus === 'SUSPENDED'
+                ? 'Your responder account has been suspended pending document compliance. Tap to contact dispatch operations.'
+                : 'Your driver license and vehicle papers are under administrative review. Unverified drivers cannot go online or accept emergency dispatches.'}
             </Text>
+            <Text style={styles.noticeAction}>Tap to view verification checklist ➔</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -132,8 +252,9 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
         {activeJourney ? (
           <TouchableOpacity
             onPress={onNavigateActiveJourney}
-            activeOpacity={0.85}
-            style={styles.activeJourneyBanner}
+            activeOpacity={0.88}
+            style={styles.activeJourneyCard}
+            accessibilityLabel="Active Emergency Journey In Progress. Tap to open route."
           >
             <View style={styles.activeJourneyHeader}>
               <View style={styles.activeJourneyPill}>
@@ -142,12 +263,21 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
               </View>
               <StatusBadge state={activeJourney.status} />
             </View>
-            <Text style={styles.activeJourneyPatient}>
-              Passenger: {activeJourney.patientName} • {activeJourney.location.villageCommunity}
+
+            <Text style={styles.activePassengerName}>
+              Passenger: {activeJourney.patientName}
             </Text>
-            <Text style={styles.activeJourneySub}>
-              Destination: {activeJourney.destinationFacility?.name || 'Maternity Center'} ➔ Tap to open route navigation
+            <Text style={styles.activePickupLoc}>
+              📍 Pickup: {activeJourney.location.villageCommunity}
+              {activeJourney.location.landmark ? ` (${activeJourney.location.landmark})` : ''}
             </Text>
+            <Text style={styles.activeDestLoc}>
+              🏥 Clinic: {activeJourney.destinationFacility?.name || 'Maternal Health Center'}
+            </Text>
+
+            <View style={styles.resumeJourneyBtn}>
+              <Text style={styles.resumeJourneyText}>Resume Trip Navigation ➔</Text>
+            </View>
           </TouchableOpacity>
         ) : null}
 
@@ -158,72 +288,97 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
           </View>
         ) : null}
 
-        {/* AVAILABILITY TOGGLE CONTROL */}
-        <Card style={[styles.availabilityCard, isOnline ? styles.availOnline : styles.availOffline]}>
-          <View style={styles.availHeader}>
-            <View style={styles.availStatusRow}>
-              <View style={[styles.statusDot, isOnline ? styles.statusDotOnline : styles.statusDotOffline]} />
+        {/* LARGE AVAILABILITY CONTROL CARD */}
+        <Card
+          style={[
+            styles.availabilityCard,
+            isOnline ? styles.availOnlineCard : styles.availOfflineCard,
+          ]}
+        >
+          <View style={styles.availHeaderRow}>
+            <View style={styles.availHeaderLeft}>
+              <View
+                style={[
+                  styles.availStatusDot,
+                  isOnline ? styles.availStatusDotOnline : styles.availStatusDotOffline,
+                ]}
+              />
               <View>
-                <Text style={[styles.availStatusTitle, isOnline ? styles.textOnline : styles.textOffline]}>
+                <Text
+                  style={[
+                    styles.availStatusTitle,
+                    isOnline ? styles.availTextOnline : styles.availTextOffline,
+                  ]}
+                >
                   {isOnline ? 'ONLINE • AVAILABLE FOR DISPATCH' : 'OFFLINE • OFF DUTY'}
                 </Text>
                 <Text style={styles.availStatusSub}>
                   {isOnline
-                    ? 'Active in RideRoute emergency transport network'
-                    : 'Not receiving emergency transport offers'}
+                    ? 'Active in local emergency maternal transport network'
+                    : 'Not currently receiving emergency ride offers'}
                 </Text>
               </View>
             </View>
 
-            {toggling ? (
-              <ActivityIndicator color={isOnline ? colors.semantic.emerald : colors.neutral.textSecondary} size="small" />
-            ) : null}
+            {toggling && (
+              <ActivityIndicator
+                color={isOnline ? '#059669' : '#0D5C96'}
+                size="small"
+              />
+            )}
           </View>
 
           <Text style={styles.availDescription}>
             {isOnline
-              ? 'Your vehicle is visible to maternal emergency dispatchers. Keep your phone nearby and maintain road-safe focus.'
-              : 'Switch online when your vehicle is road-ready and you are available to coordinate maternal healthcare transportation.'}
+              ? 'Your vehicle is visible to maternal emergency coordinators. Keep your phone mounted safely and maintain road focus.'
+              : 'Switch online when your vehicle is road-ready, fueled, and you are prepared to coordinate rapid obstetric clinic transport.'}
           </Text>
 
           <TouchableOpacity
             onPress={handleToggle}
-            disabled={toggling || responder.verificationStatus !== 'VERIFIED'}
+            disabled={toggling || !isVerified}
             style={[
               styles.toggleBtn,
               isOnline ? styles.toggleBtnOnline : styles.toggleBtnOffline,
-              responder.verificationStatus !== 'VERIFIED' && styles.toggleDisabled,
+              !isVerified && styles.toggleDisabled,
             ]}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isOnline ? 'Go Offline: End Shift' : 'Go Online: Start Shift'
+            }
           >
-            <Text style={[styles.toggleBtnText, isOnline ? styles.toggleBtnTextOnline : styles.toggleBtnTextOffline]}>
+            <Text
+              style={[
+                styles.toggleBtnText,
+                isOnline ? styles.toggleBtnTextOnline : styles.toggleBtnTextOffline,
+              ]}
+            >
               {isOnline ? 'Go Offline (End Shift)' : 'Go Online (Start Shift)'}
             </Text>
           </TouchableOpacity>
-
-          {responder.verificationStatus !== 'VERIFIED' ? (
-            <Text style={styles.unverifiedNote}>
-              * Document verification required before you can go online and receive dispatches.
-            </Text>
-          ) : null}
         </Card>
 
         {/* INCOMING OFFER CALLOUT (If pending offer exists) */}
         {activeOffer ? (
           <TouchableOpacity
             onPress={() => setShowOfferModal(true)}
-            activeOpacity={0.85}
+            activeOpacity={0.88}
             style={styles.pendingOfferCard}
+            accessibilityLabel="New Emergency Transport Offer Waiting. Tap to review."
           >
             <View style={styles.offerCardHeader}>
               <View style={styles.offerPill}>
-                <View style={styles.activePulseDot} />
-                <Text style={styles.offerAlertBadge}>NEW EMERGENCY OFFER WAITING</Text>
+                <View style={styles.offerPulseDot} />
+                <Text style={styles.offerAlertBadge}>NEW EMERGENCY OFFER</Text>
               </View>
-              <Text style={styles.offerDistance}>
-                {activeOffer.estimatedDistanceKm || 2.1} km away
-              </Text>
+              {activeOffer.estimatedDistanceKm ? (
+                <Text style={styles.offerDistance}>
+                  {activeOffer.estimatedDistanceKm} km away
+                </Text>
+              ) : null}
             </View>
+
             <Text style={styles.offerPickup}>
               Pickup: {activeOffer.pickupLocation.villageCommunity}
             </Text>
@@ -232,35 +387,53 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
                 Landmark: {activeOffer.pickupLocation.landmark}
               </Text>
             ) : null}
-            <Text style={styles.offerActionPrompt}>
-              Review emergency details and accept / decline ➔
-            </Text>
+            {activeOffer.destinationFacility ? (
+              <Text style={styles.offerDestination}>
+                To: {activeOffer.destinationFacility.name}
+              </Text>
+            ) : null}
+
+            <View style={styles.reviewOfferBtn}>
+              <Text style={styles.reviewOfferText}>Review Emergency Offer ➔</Text>
+            </View>
           </TouchableOpacity>
         ) : isOnline && !activeJourney ? (
-          /* EMPTY STATE WHEN ONLINE & WAITING */
+          /* RADAR LISTENING STANDBY STATE (WHEN ONLINE & WAITING) */
           <Card style={styles.waitingCard}>
-            <View style={styles.radarVisual}>
-              <View style={styles.radarRingOuter}>
-                <View style={styles.radarRingInner}>
-                  <Text style={styles.waitingIcon}>📡</Text>
+            <View style={styles.radarVisualContainer}>
+              <View style={styles.radarWaveOuter}>
+                <View style={styles.radarWaveMid}>
+                  <View style={styles.radarWaveInner}>
+                    <Text style={styles.radarCenterIcon}>📡</Text>
+                  </View>
                 </View>
               </View>
             </View>
+
             <Text style={styles.waitingTitle}>Listening for Emergency Requests</Text>
             <Text style={styles.waitingSubtitle}>
-              You are on standby in the <Text style={styles.highlightText}>{responder.communityBase || 'Karu / Nyanya'}</Text> maternal dispatch corridor. An emergency offer alert will sound as soon as a mother in your vicinity needs transport.
+              Standby in{' '}
+              <Text style={styles.highlightText}>
+                {responder.communityBase || 'Karu / Nyanya'}
+              </Text>{' '}
+              dispatch sector. An emergency offer alert will sound as soon as a mother in your vicinity requires transport.
             </Text>
-            <View style={styles.waitingPill}>
-              <Text style={styles.waitingPillText}>✓ GPS Location Active • Dispatch Radius: ~5km</Text>
+
+            <View style={styles.waitingStatusPill}>
+              <View style={styles.waitingDot} />
+              <Text style={styles.waitingStatusText}>
+                GPS Standby Active • Standing by for Local Dispatch Offers
+              </Text>
             </View>
           </Card>
         ) : !isOnline && !activeJourney ? (
-          /* EMPTY STATE WHEN OFFLINE */
+          /* OFFLINE STATE */
           <Card style={styles.offlineCard}>
             <Text style={styles.offlineIcon}>🌙</Text>
             <Text style={styles.offlineTitle}>You Are Currently Offline</Text>
             <Text style={styles.offlineSubtitle}>
-              When you are ready to receive urgent obstetric ride requests, toggle your status to <Text style={styles.highlightText}>Go Online</Text> above.
+              When you are ready to receive urgent obstetric ride requests, tap{' '}
+              <Text style={styles.highlightText}>Go Online</Text> above.
             </Text>
           </Card>
         ) : null}
@@ -268,7 +441,10 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
         {/* PERFORMANCE & STATS — CLEARLY LABELED AS SIMULATED DATA */}
         <Card style={styles.statsCard}>
           <View style={styles.statsHeaderRow}>
-            <Text style={styles.cardHeading}>Service Summary</Text>
+            <View style={styles.statsHeaderLeft}>
+              <Text style={styles.statsCardIcon}>📊</Text>
+              <Text style={styles.cardHeading}>Service Summary</Text>
+            </View>
             <View style={styles.simulatedBadge}>
               <Text style={styles.simulatedBadgeText}>Simulated Dev Data</Text>
             </View>
@@ -281,7 +457,9 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats?.totalCompletedTrips ?? responder.completedTripsCount}</Text>
+              <Text style={styles.statValue}>
+                {stats?.totalCompletedTrips ?? responder.completedTripsCount}
+              </Text>
               <Text style={styles.statLabel}>Lifetime Rides</Text>
             </View>
             <View style={styles.statDivider} />
@@ -291,55 +469,84 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
             </View>
           </View>
           <Text style={styles.statsNote}>
-            * Trip statistics are simulated development representations. Live statistics will synchronize with Developer 2's Python backend.
+            * Statistics are simulated representations during development. Synchronizes with Python dispatch engine.
           </Text>
         </Card>
 
-        {/* VEHICLE DETAILS CARD */}
+        {/* REGISTERED VEHICLE DETAILS CARD */}
         <Card style={styles.vehicleCard}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardHeading}>Registered Transport Vehicle</Text>
-            <Text style={styles.verifiedTag}>
-              {responder.vehicle.insuranceValid ? '✓ Insurance Active' : 'Pending'}
-            </Text>
+            <View style={styles.statsHeaderLeft}>
+              <Text style={styles.statsCardIcon}>
+                {responder.vehicle.vehicleType === 'MOTORCYCLE' ? '🏍️' : '🚕'}
+              </Text>
+              <Text style={styles.cardHeading}>Registered Vehicle</Text>
+            </View>
+            <View
+              style={[
+                styles.insurancePill,
+                responder.vehicle.insuranceValid
+                  ? styles.insuranceValid
+                  : styles.insurancePending,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.insurancePillText,
+                  responder.vehicle.insuranceValid
+                    ? styles.insuranceValidText
+                    : styles.insurancePendingText,
+                ]}
+              >
+                {responder.vehicle.insuranceValid ? '✓ Insurance Verified' : 'Insurance Pending'}
+              </Text>
+            </View>
           </View>
+
           <Text style={styles.vehicleName}>
-            {responder.vehicle.vehicleType === 'MOTORCYCLE' ? '🏍️ Motorcycle' : '🚕 Taxi'} •{' '}
-            {responder.vehicle.makeModel}
+            {responder.vehicle.makeModel} ({responder.vehicle.color})
           </Text>
-          <Text style={styles.vehicleMeta}>
-            Plate: {responder.vehicle.licensePlate} • Color: {responder.vehicle.color}
-          </Text>
-          <Text style={styles.vehicleLicense}>
-            Driver License: {responder.driverLicenseNumber}
-          </Text>
+          <View style={styles.vehicleDetailsRow}>
+            <View style={styles.vehiclePill}>
+              <Text style={styles.vehiclePillLabel}>PLATE:</Text>
+              <Text style={styles.vehiclePillVal}>{responder.vehicle.licensePlate}</Text>
+            </View>
+            <View style={styles.vehiclePill}>
+              <Text style={styles.vehiclePillLabel}>LICENSE:</Text>
+              <Text style={styles.vehiclePillVal}>{responder.driverLicenseNumber}</Text>
+            </View>
+          </View>
         </Card>
 
-        {/* SAFETY & RESPONSIBILITY GUIDELINES */}
+        {/* SAFETY & DRIVING RESPONSIBILITY GUIDELINES */}
         <SafetyBanner />
 
-        {/* DEVELOPER SIMULATION CONTROLS */}
+        {/* REVIEWER & DEV TESTING TOOL */}
         <View style={styles.devSimCard}>
           <View style={styles.devSimHeaderRow}>
-            <Text style={styles.devSimTitle}>🛠️ Developer / Reviewer Testing Tool</Text>
+            <Text style={styles.devSimTitle}>🛠️ Developer Dispatch Simulator</Text>
             <View style={styles.devTag}>
-              <Text style={styles.devTagText}>Dev Only</Text>
+              <Text style={styles.devTagText}>Dev Tool</Text>
             </View>
           </View>
           <Text style={styles.devSimSub}>
-            Simulate Developer 2's Python backend dispatch engine broadcasting a maternal emergency offer:
+            Simulate an emergency dispatch offer broadcast from Developer 2's Python backend:
           </Text>
           <Button
-            title="[SIMULATE] Trigger Incoming Emergency Offer"
+            title="[SIMULATE] Broadcast Incoming Emergency Offer"
             variant="secondary"
             size="md"
             onPress={handleTriggerSimulatedOffer}
           />
         </View>
 
-        {/* SWITCH PORTAL LINK */}
+        {/* SWITCH TO PATIENT PORTAL */}
         <View style={styles.switchWrapper}>
-          <TouchableOpacity onPress={onSwitchToPatientPortal} style={styles.switchBtn}>
+          <TouchableOpacity
+            onPress={onSwitchToPatientPortal}
+            style={styles.switchBtn}
+            activeOpacity={0.7}
+          >
             <Text style={styles.switchBtnText}>➔ Switch to Patient Mobile Portal</Text>
           </TouchableOpacity>
         </View>
@@ -359,6 +566,37 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
           setShowOfferModal(false);
         }}
       />
+
+      {/* NOTIFICATIONS MODAL */}
+      <Modal
+        visible={showNotificationModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowNotificationModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContentCard}>
+            <View style={styles.modalIconBadge}>
+              <Text style={{ fontSize: 26 }}>🔔</Text>
+            </View>
+            <Text style={styles.modalTitle}>Responder Notifications</Text>
+            <View style={styles.notificationItem}>
+              <Text style={styles.notifItemTitle}>🛡️ Shift Verification Status</Text>
+              <Text style={styles.notifItemDesc}>
+                {isVerified
+                  ? 'Your transport account is verified for active maternal dispatches.'
+                  : 'Document review in progress. Complete outstanding items in Account.'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.modalPrimaryBtn}
+              onPress={() => setShowNotificationModal(false)}
+            >
+              <Text style={styles.modalPrimaryBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -366,539 +604,922 @@ export const ResponderDashboardScreen: React.FC<ResponderDashboardProps> = ({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.neutral.background,
+    backgroundColor: '#EEF4FA', // Clean light blue-grey matching patient portal
+  },
+  radarContainer: {
+    position: 'absolute',
+    top: -30,
+    left: -30,
+    width: 320,
+    height: 320,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radarRing: {
+    position: 'absolute',
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: 'rgba(195, 218, 238, 0.45)',
+  },
+  radarRing1: {
+    width: 80,
+    height: 80,
+    borderColor: 'rgba(180, 210, 235, 0.65)',
+  },
+  radarRing2: {
+    width: 140,
+    height: 140,
+    borderColor: 'rgba(180, 210, 235, 0.50)',
+  },
+  radarRing3: {
+    width: 200,
+    height: 200,
+    borderColor: 'rgba(180, 210, 235, 0.35)',
+  },
+  radarRing4: {
+    width: 260,
+    height: 260,
+    borderColor: 'rgba(180, 210, 235, 0.22)',
   },
   container: {
     flex: 1,
   },
   content: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xxxl,
+    paddingTop: 16,
+    paddingBottom: 36,
   },
-  topHeader: {
+
+  // TOP HEADER
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
-    backgroundColor: colors.neutral.white,
-    padding: spacing.md,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.neutral.border,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 14,
   },
-  avatarWrapper: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.healthcare.light,
-    borderColor: colors.healthcare.border,
-    borderWidth: 1.5,
+  profileSection: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
-  },
-  avatarEmoji: {
-    fontSize: 26,
-  },
-  headerInfo: {
     flex: 1,
   },
-  portalTagRow: {
+  avatarWrapper: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    backgroundColor: '#0D5C96',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  avatarGlyph: {
+    fontSize: 22,
+  },
+  headerInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  driverGreetingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
   },
-  portalTag: {
-    ...typography.label,
-    fontSize: 9,
-    color: colors.healthcare.primary,
-    letterSpacing: 1,
+  greetingPrefix: {
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#0F172A',
   },
-  verificationMiniTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-  },
-  verificationMiniText: {
-    ...typography.caption,
-    fontSize: 9,
+  driverName: {
+    fontSize: 18,
     fontWeight: '800',
+    color: '#0F172A',
   },
-  responderName: {
-    ...typography.h3,
-    color: colors.neutral.textPrimary,
-    fontWeight: '800',
+  badgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 3,
   },
-  vehicleSubtitle: {
-    ...typography.caption,
-    color: colors.neutral.textSecondary,
+  verificationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  verificationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 5,
+  },
+  verificationText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  vehicleTypePill: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  vehicleTypeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  circleActionButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    position: 'relative',
+  },
+  bellIconWrapper: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellDome: {
+    width: 13,
+    height: 10,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    borderWidth: 2,
+    borderColor: '#0F172A',
+    borderBottomWidth: 0,
+  },
+  bellRim: {
+    width: 16,
+    height: 2,
+    backgroundColor: '#0F172A',
+    borderRadius: 1,
+  },
+  bellClapper: {
+    width: 4,
+    height: 3,
+    backgroundColor: '#0F172A',
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
     marginTop: 1,
   },
-  profileBadge: {
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.sm + 4,
-    backgroundColor: colors.neutral.surfaceAlt,
-    borderColor: colors.neutral.borderStrong,
-    borderWidth: 1,
-    borderRadius: borderRadius.md,
-  },
-  profileBadgeText: {
-    ...typography.caption,
-    fontWeight: '700',
-    color: colors.healthcare.primary,
-  },
-  verificationNoticeCard: {
-    backgroundColor: colors.semantic.amberBg,
-    borderColor: colors.semantic.amberBorder,
+  notificationBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#0D5C96',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
     borderWidth: 1.5,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    borderColor: '#FFFFFF',
   },
-  verificationHeader: {
+  notificationBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  cogIconWrapper: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  cogCenter: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#0F172A',
+  },
+  cogTooth: {
+    position: 'absolute',
+    backgroundColor: '#0F172A',
+  },
+  cogToothV: {
+    width: 2,
+    height: 16,
+  },
+  cogToothH: {
+    width: 16,
+    height: 2,
+  },
+
+  // VERIFICATION NOTICE CARD
+  verificationNoticeCard: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1.5,
+  },
+  noticeCardPending: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#F59E0B',
+  },
+  noticeCardSuspended: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#EF4444',
+  },
+  noticeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    gap: 8,
   },
-  verificationIcon: {
+  noticeIcon: {
     fontSize: 16,
-    marginRight: 6,
   },
-  verificationTitle: {
-    ...typography.bodyLarge,
+  noticeTitle: {
+    fontSize: 14,
     fontWeight: '800',
-    color: colors.semantic.amber,
   },
-  verificationDescription: {
-    ...typography.caption,
-    color: colors.neutral.textPrimary,
+  noticeTitlePending: {
+    color: '#B45309',
+  },
+  noticeTitleSuspended: {
+    color: '#DC2626',
+  },
+  noticeBody: {
+    fontSize: 13,
+    color: '#475569',
+    marginTop: 4,
     lineHeight: 18,
   },
-  activeJourneyBanner: {
-    backgroundColor: colors.emergency.light,
-    borderColor: colors.emergency.primary,
+  noticeAction: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0D5C96',
+    marginTop: 8,
+  },
+
+  // ACTIVE JOURNEY CARD
+  activeJourneyCard: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 16,
     borderWidth: 2,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    shadowColor: colors.emergency.primary,
+    borderColor: '#DC2626',
+    shadowColor: '#DC2626',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 10,
+    elevation: 4,
   },
   activeJourneyHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    justifyContent: 'space-between',
+    marginBottom: 10,
   },
   activeJourneyPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
   activePulseDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.emergency.primary,
+    backgroundColor: '#DC2626',
+    marginRight: 6,
   },
   activeJourneyTitle: {
-    ...typography.caption,
-    fontWeight: '900',
-    color: colors.emergency.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#DC2626',
     letterSpacing: 0.5,
   },
-  activeJourneyPatient: {
-    ...typography.bodyLarge,
+  activePassengerName: {
+    fontSize: 16,
     fontWeight: '800',
-    color: colors.neutral.textPrimary,
-    marginBottom: 2,
+    color: '#0F172A',
   },
-  activeJourneySub: {
-    ...typography.caption,
-    color: colors.emergency.dark,
+  activePickupLoc: {
+    fontSize: 13,
+    color: '#475569',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  activeDestLoc: {
+    fontSize: 13,
+    color: '#0D5C96',
+    marginTop: 3,
     fontWeight: '600',
   },
-  errorBox: {
-    backgroundColor: colors.emergency.light,
-    borderColor: colors.emergency.border,
-    borderWidth: 1,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.md,
+  resumeJourneyBtn: {
+    marginTop: 12,
+    backgroundColor: '#DC2626',
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  errorText: {
-    ...typography.caption,
-    color: colors.emergency.dark,
+  resumeJourneyText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '700',
   },
+
+  // ERROR BOX
+  errorBox: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#DC2626',
+  },
+  errorText: {
+    color: '#B91C1C',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // AVAILABILITY CARD
   availabilityCard: {
-    marginBottom: spacing.md,
-    borderWidth: 2,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    borderRadius: 24,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  availOnline: {
-    borderColor: colors.semantic.emeraldBorder,
-    backgroundColor: colors.semantic.emeraldBg,
+  availOnlineCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#A7F3D0',
   },
-  availOffline: {
-    borderColor: colors.neutral.borderStrong,
-    backgroundColor: colors.neutral.white,
+  availOfflineCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
   },
-  availHeader: {
+  availHeaderRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xs,
+    justifyContent: 'space-between',
   },
-  availStatusRow: {
+  availHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  statusDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    marginRight: 10,
+  availStatusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 12,
   },
-  statusDotOnline: {
-    backgroundColor: colors.semantic.emerald,
+  availStatusDotOnline: {
+    backgroundColor: '#059669',
   },
-  statusDotOffline: {
-    backgroundColor: colors.neutral.textMuted,
+  availStatusDotOffline: {
+    backgroundColor: '#94A3B8',
   },
   availStatusTitle: {
-    ...typography.label,
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 14,
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
+  availTextOnline: {
+    color: '#059669',
+  },
+  availTextOffline: {
+    color: '#475569',
+  },
   availStatusSub: {
-    ...typography.caption,
-    fontSize: 11,
-    color: colors.neutral.textSecondary,
-    marginTop: 1,
-  },
-  textOnline: {
-    color: colors.semantic.emerald,
-  },
-  textOffline: {
-    color: colors.neutral.textSecondary,
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
   },
   availDescription: {
-    ...typography.body,
-    color: colors.neutral.textSecondary,
-    lineHeight: 20,
-    marginBottom: spacing.md,
+    fontSize: 13,
+    color: '#475569',
+    lineHeight: 19,
+    marginVertical: 14,
   },
   toggleBtn: {
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
+    borderRadius: 14,
+    paddingVertical: 14,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   toggleBtnOnline: {
-    backgroundColor: colors.neutral.white,
-    borderColor: colors.semantic.emeraldBorder,
+    backgroundColor: '#F1F5F9',
     borderWidth: 1.5,
+    borderColor: '#CBD5E1',
   },
   toggleBtnOffline: {
-    backgroundColor: colors.healthcare.primary,
+    backgroundColor: '#0D5C96',
+  },
+  toggleDisabled: {
+    opacity: 0.6,
   },
   toggleBtnText: {
-    ...typography.bodyLarge,
+    fontSize: 15,
     fontWeight: '800',
   },
   toggleBtnTextOnline: {
-    color: colors.semantic.emerald,
+    color: '#475569',
   },
   toggleBtnTextOffline: {
-    color: colors.neutral.white,
+    color: '#FFFFFF',
   },
-  toggleDisabled: {
-    opacity: 0.5,
-  },
-  unverifiedNote: {
-    ...typography.caption,
-    color: colors.semantic.amber,
-    fontStyle: 'italic',
-    marginTop: 8,
-    textAlign: 'center',
-  },
+
+  // PENDING OFFER ALERT CARD
   pendingOfferCard: {
-    backgroundColor: colors.emergency.light,
-    borderColor: colors.emergency.primary,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 16,
     borderWidth: 2,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    shadowColor: colors.emergency.primary,
+    borderColor: '#F59E0B',
+    shadowColor: '#F59E0B',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
     elevation: 4,
   },
   offerCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   offerPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  offerPulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#D97706',
+    marginRight: 6,
   },
   offerAlertBadge: {
-    ...typography.label,
     fontSize: 11,
-    fontWeight: '900',
-    color: colors.emergency.primary,
+    fontWeight: '800',
+    color: '#B45309',
   },
   offerDistance: {
-    ...typography.caption,
-    fontWeight: '800',
-    color: colors.emergency.dark,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0D5C96',
   },
   offerPickup: {
-    ...typography.h3,
-    color: colors.neutral.textPrimary,
-    marginTop: 2,
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   offerLandmark: {
-    ...typography.body,
-    color: colors.healthcare.primary,
+    fontSize: 13,
+    color: '#475569',
+    marginTop: 2,
+  },
+  offerDestination: {
+    fontSize: 13,
+    color: '#059669',
     fontWeight: '600',
-    marginTop: 1,
+    marginTop: 3,
   },
-  offerActionPrompt: {
-    ...typography.caption,
-    color: colors.healthcare.primary,
-    fontWeight: '700',
-    marginTop: spacing.xs,
-  },
-  waitingCard: {
+  reviewOfferBtn: {
+    marginTop: 12,
+    backgroundColor: '#D97706',
+    paddingVertical: 10,
+    borderRadius: 12,
     alignItems: 'center',
-    paddingVertical: spacing.xl,
-    marginBottom: spacing.md,
   },
-  radarVisual: {
-    marginBottom: spacing.md,
+  reviewOfferText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
-  radarRingOuter: {
+
+  // RADAR STANDBY CARD
+  waitingCard: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    borderRadius: 24,
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  radarVisualContainer: {
     width: 80,
     height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.semantic.emeraldBg,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.semantic.emeraldBorder,
+    marginBottom: 12,
   },
-  radarRingInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.neutral.white,
+  radarWaveOuter: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: 'rgba(2, 132, 199, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.semantic.emeraldBorder,
   },
-  waitingIcon: {
-    fontSize: 26,
+  radarWaveMid: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radarWaveInner: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radarCenterIcon: {
+    fontSize: 20,
   },
   waitingTitle: {
-    ...typography.h3,
-    color: colors.neutral.textPrimary,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
     marginBottom: 6,
   },
   waitingSubtitle: {
-    ...typography.body,
-    color: colors.neutral.textSecondary,
+    fontSize: 13,
+    color: '#475569',
     textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: spacing.sm,
+    lineHeight: 19,
+    marginBottom: 12,
   },
   highlightText: {
     fontWeight: '700',
-    color: colors.healthcare.primary,
+    color: '#0D5C96',
   },
-  waitingPill: {
-    backgroundColor: colors.semantic.emeraldBg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-    marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.semantic.emeraldBorder,
-  },
-  waitingPillText: {
-    ...typography.caption,
-    color: colors.semantic.emerald,
-    fontWeight: '700',
-    fontSize: 11,
-  },
-  offlineCard: {
+  waitingStatusPill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.xl,
-    marginBottom: spacing.md,
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  waitingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16A34A',
+    marginRight: 6,
+  },
+  waitingStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#16A34A',
+  },
+
+  // OFFLINE CARD
+  offlineCard: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    borderRadius: 24,
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   offlineIcon: {
     fontSize: 32,
-    marginBottom: spacing.xs,
+    marginBottom: 8,
   },
   offlineTitle: {
-    ...typography.h3,
-    color: colors.neutral.textPrimary,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
     marginBottom: 4,
   },
   offlineSubtitle: {
-    ...typography.body,
-    color: colors.neutral.textSecondary,
+    fontSize: 13,
+    color: '#64748B',
     textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: spacing.md,
+    lineHeight: 18,
   },
+
+  // STATS CARD
   statsCard: {
-    marginBottom: spacing.md,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    borderRadius: 24,
+    padding: 18,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   statsHeaderRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  statsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statsCardIcon: {
+    fontSize: 18,
   },
   cardHeading: {
-    ...typography.label,
-    color: colors.neutral.textSecondary,
-    textTransform: 'uppercase',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   simulatedBadge: {
-    backgroundColor: colors.neutral.surfaceAlt,
-    borderColor: colors.neutral.borderStrong,
-    borderWidth: 1,
+    backgroundColor: '#F1F5F9',
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: borderRadius.full,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
   simulatedBadgeText: {
-    ...typography.caption,
-    fontSize: 9,
-    fontWeight: '800',
-    color: colors.neutral.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.3,
   },
   statsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: spacing.xs,
+    justifyContent: 'space-around',
+    paddingVertical: 8,
   },
   statBox: {
-    flex: 1,
     alignItems: 'center',
+    flex: 1,
   },
   statValue: {
-    ...typography.h2,
-    color: colors.neutral.textPrimary,
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   statLabel: {
-    ...typography.caption,
-    color: colors.neutral.textSecondary,
+    fontSize: 12,
+    color: '#64748B',
     marginTop: 2,
   },
   statDivider: {
     width: 1,
     height: 32,
-    backgroundColor: colors.neutral.border,
+    backgroundColor: '#E2E8F0',
   },
   statsNote: {
-    ...typography.caption,
-    fontSize: 10,
-    color: colors.neutral.textMuted,
-    fontStyle: 'italic',
-    marginTop: spacing.md,
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 10,
     textAlign: 'center',
   },
+
+  // VEHICLE CARD
   vehicleCard: {
-    marginBottom: spacing.md,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    borderRadius: 24,
+    padding: 18,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   cardHeaderRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'space-between',
+    marginBottom: 10,
   },
-  verifiedTag: {
-    ...typography.caption,
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.semantic.emerald,
+  insurancePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  insuranceValid: {
+    backgroundColor: '#ECFDF5',
+  },
+  insurancePending: {
+    backgroundColor: '#FEF3C7',
+  },
+  insurancePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  insuranceValidText: {
+    color: '#059669',
+  },
+  insurancePendingText: {
+    color: '#B45309',
   },
   vehicleName: {
-    ...typography.h3,
-    color: colors.neutral.textPrimary,
-    marginTop: 2,
-  },
-  vehicleMeta: {
-    ...typography.body,
-    color: colors.neutral.textSecondary,
-    marginTop: 2,
-  },
-  vehicleLicense: {
-    ...typography.caption,
-    color: colors.healthcare.primary,
+    fontSize: 15,
     fontWeight: '700',
-    marginTop: 4,
+    color: '#0F172A',
   },
+  vehicleDetailsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  vehiclePill: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 4,
+  },
+  vehiclePillLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  vehiclePillVal: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  // DEV CONTROLS
   devSimCard: {
-    backgroundColor: colors.neutral.white,
-    borderColor: colors.healthcare.border,
-    borderWidth: 1.5,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderStyle: 'dashed',
   },
   devSimHeaderRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
   devSimTitle: {
-    ...typography.label,
-    color: colors.healthcare.dark,
+    fontSize: 14,
     fontWeight: '800',
+    color: '#334155',
   },
   devTag: {
-    backgroundColor: colors.healthcare.light,
+    backgroundColor: '#E2E8F0',
     paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: borderRadius.sm,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   devTagText: {
-    ...typography.caption,
-    fontSize: 9,
-    fontWeight: '800',
-    color: colors.healthcare.dark,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#475569',
   },
   devSimSub: {
-    ...typography.caption,
-    color: colors.neutral.textSecondary,
-    marginBottom: spacing.sm,
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 12,
+    lineHeight: 16,
   },
+
+  // SWITCH PORTAL LINK
   switchWrapper: {
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    marginHorizontal: 20,
+    marginBottom: 20,
   },
   switchBtn: {
-    padding: spacing.sm,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
   },
   switchBtnText: {
-    ...typography.body,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.healthcare.primary,
+    color: '#0D5C96',
+  },
+
+  // MODAL
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContentCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  modalIconBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  notificationItem: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: '#0D5C96',
+  },
+  notifItemTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  notifItemDesc: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  modalPrimaryBtn: {
+    backgroundColor: '#0D5C96',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    width: '100%',
+    alignItems: 'center',
+  },
+  modalPrimaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

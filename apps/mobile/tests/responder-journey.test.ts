@@ -133,6 +133,20 @@ describe('RideRoute Responder Mobile Journey — Quality Audit & Regression Suit
     const demo3 = await authService.loginAsDemo('resp-203');
     assert.equal(demo3.responder.id, 'resp-203');
     assert.equal(demo3.responder.verificationStatus, 'PENDING');
+
+    // Production API service strictly rejects demo shortcuts preventing production misuse
+    const { ResponderAuthApiService } = await import('../src/services/api/responderApiService.ts');
+    const apiAuth = new ResponderAuthApiService();
+    await assert.rejects(
+      async () => {
+        await apiAuth.loginAsDemo('resp-201');
+      },
+      (err: any) => {
+        assert.equal(err.code, 'DEMO_AUTH_DISABLED');
+        assert.equal(err.statusCode, 403);
+        return true;
+      }
+    );
   });
 
   // 4. Verification status restrictions
@@ -313,7 +327,7 @@ describe('RideRoute Responder Mobile Journey — Quality Audit & Regression Suit
     assert.equal(journey.history.length, 7);
 
     // Step 5: COMPLETED via Handover
-    journey = await journeyService.completeHandover(journey.id, 'resp-201', 'Handed over to Nurse Chioma at triage');
+    journey = await journeyService.completeHandover(journey.id, 'resp-201', 'Handed over to Nurse Chioma at facility reception');
     assert.equal(journey.status, 'COMPLETED');
     assert.ok(journey.history.some((m) => m.state === 'COMPLETED'));
 
@@ -364,6 +378,23 @@ describe('RideRoute Responder Mobile Journey — Quality Audit & Regression Suit
         return true;
       }
     );
+
+    // Advance to ARRIVED
+    await journeyService.advanceJourneyState(journey.id, 'resp-201', 'PATIENT_ONBOARD');
+    await journeyService.advanceJourneyState(journey.id, 'resp-201', 'IN_TRANSIT');
+    await journeyService.advanceJourneyState(journey.id, 'resp-201', 'ARRIVED');
+
+    // ARRIVED does not mean COMPLETED: attempting advanceJourneyState to COMPLETED is strictly rejected
+    await assert.rejects(
+      async () => {
+        await journeyService.advanceJourneyState(journey.id, 'resp-201', 'COMPLETED');
+      },
+      (err: any) => {
+        assert.equal(err.code, 'INVALID_STATE_TRANSITION');
+        assert.ok(err.message.includes('completeHandover'));
+        return true;
+      }
+    );
   });
 
   // 12. Patient privacy protection and non-medical identity
@@ -405,7 +436,7 @@ describe('RideRoute Responder Mobile Journey — Quality Audit & Regression Suit
     const completed = await journeyService.completeHandover(
       journey.id,
       'resp-201',
-      'Nurse handover complete at triage desk'
+      'Nurse handover complete at facility reception desk'
     );
 
     assert.equal(completed.status, 'COMPLETED');
@@ -465,7 +496,7 @@ describe('RideRoute Responder Mobile Journey — Quality Audit & Regression Suit
     assert.equal(journey.status, 'IN_TRANSIT');
 
     journey = await journeyService.advanceJourneyState(journey.id, 'resp-201', 'ARRIVED');
-    journey = await journeyService.completeHandover(journey.id, 'resp-201', 'Transferred to triage');
+    journey = await journeyService.completeHandover(journey.id, 'resp-201', 'Transferred to facility reception');
     assert.equal(journey.status, 'COMPLETED');
   });
 

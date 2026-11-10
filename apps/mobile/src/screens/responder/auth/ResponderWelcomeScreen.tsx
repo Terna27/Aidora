@@ -40,20 +40,20 @@ export const ResponderWelcomeScreen: React.FC<ResponderWelcomeScreenProps> = ({
 
       {/* MISSION CARD WITH DISPATCH PERFORMANCE */}
       <View style={styles.missionCard}>
-        <Text style={styles.missionTitle}>Transport mothers. Save lives.</Text>
+        <Text style={styles.missionTitle}>Emergency Maternal Transportation</Text>
         <Text style={styles.missionBody}>
-          Join verified commercial motorcycle riders and taxi drivers providing rapid, life-saving transportation for pregnant mothers in labor or distress to nearby healthcare clinics.
+          Connect expectant mothers in labor or obstetric distress with registered local commercial motorcycle riders and taxi drivers for safe transportation to healthcare facilities.
         </Text>
 
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statNum}>100%</Text>
-            <Text style={styles.statLabel}>Verified Network</Text>
+            <Text style={styles.statNum}>Vetted</Text>
+            <Text style={styles.statLabel}>Driver Network</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statNum}>&lt; 8 min</Text>
-            <Text style={styles.statLabel}>Target Response</Text>
+            <Text style={styles.statNum}>Priority</Text>
+            <Text style={styles.statLabel}>Local Dispatch</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
@@ -85,14 +85,14 @@ export const ResponderWelcomeScreen: React.FC<ResponderWelcomeScreenProps> = ({
 
         {/* DEMO FAST TRACKS */}
         <View style={styles.demoSection}>
-          <Text style={styles.demoLabel}>⚡ Instant Test Driver Accounts:</Text>
+          <Text style={styles.demoLabel}>⚡ Test Driver Accounts (Simulated Development Only):</Text>
           <TouchableOpacity
             onPress={() => onQuickDemoLogin('resp-201')}
             style={styles.demoBtn}
             activeOpacity={0.8}
           >
             <Text style={styles.demoBtnText}>
-              🏍️ Ibrahim Suleiman (Motorcycle • Verified)
+              🏍️ Ibrahim Suleiman (Motorcycle • Verified) [SIMULATED]
             </Text>
           </TouchableOpacity>
 
@@ -102,7 +102,7 @@ export const ResponderWelcomeScreen: React.FC<ResponderWelcomeScreenProps> = ({
             activeOpacity={0.8}
           >
             <Text style={styles.demoBtnText}>
-              🚕 Emmanuel Osei (Taxi Driver • Verified)
+              🚕 Emmanuel Osei (Taxi Driver • Verified) [SIMULATED]
             </Text>
           </TouchableOpacity>
 
@@ -112,7 +112,7 @@ export const ResponderWelcomeScreen: React.FC<ResponderWelcomeScreenProps> = ({
             activeOpacity={0.8}
           >
             <Text style={styles.demoBtnTextPending}>
-              ⏳ Chinedu Eze (New Driver • Verification Pending)
+              ⏳ Chinedu Eze (New Driver • Verification Pending) [SIMULATED]
             </Text>
           </TouchableOpacity>
         </View>

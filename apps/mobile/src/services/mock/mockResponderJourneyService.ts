@@ -215,6 +215,14 @@ export class MockResponderJourneyService implements IResponderJourneyService {
 
     const current = journey.status;
 
+    if (targetState === 'COMPLETED') {
+      throw new ApiError(
+        'Direct transition to COMPLETED via milestone progression is forbidden. Explicit facility handover via completeHandover() is required.',
+        'INVALID_STATE_TRANSITION',
+        400
+      );
+    }
+
     // VALID STATE TRANSITION RULES:
     const validTransitions: Record<EmergencyState, EmergencyState[]> = {
       CREATED: ['DISPATCHING'],
@@ -224,7 +232,7 @@ export class MockResponderJourneyService implements IResponderJourneyService {
       PATIENT_ONBOARD: ['HOSPITAL_SELECTED', 'IN_TRANSIT'],
       HOSPITAL_SELECTED: ['IN_TRANSIT'],
       IN_TRANSIT: ['ARRIVED'],
-      ARRIVED: ['COMPLETED'],
+      ARRIVED: [], // COMPLETED requires explicit completeHandover()
       COMPLETED: [],
       CANCELLED: [],
       EXPIRED: [],
@@ -278,7 +286,7 @@ export class MockResponderJourneyService implements IResponderJourneyService {
     journey.history.push({
       state: 'COMPLETED',
       timestamp: now,
-      note: handoverNotes || 'Patient safely received by healthcare facility triage staff.',
+      note: handoverNotes || 'Patient safely received by authorized facility representative.',
     });
 
     // Update stats

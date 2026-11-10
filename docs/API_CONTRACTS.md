@@ -46,11 +46,28 @@ All responses must adhere to the standard envelope:
 
 ---
 
-## 2. Agreed Emergency State Machine (14 States)
+## 2. Agreed Emergency State Machine & Classification
 
 ```text
-CREATED → DISPATCHING → ACCEPTED → PICKUP_ARRIVED → PATIENT_ONBOARD → HOSPITAL_SELECTED → IN_TRANSIT → ARRIVED → COMPLETED
+CREATED → DISPATCHING → ACCEPTED → PICKUP_ARRIVED → PATIENT_ONBOARD → (HOSPITAL_SELECTED) → IN_TRANSIT → ARRIVED → COMPLETED
 ```
+
+### State Classification & Domain Authority:
+1. **Backend-Authoritative States (Core Transportation Workflow):**
+   - `CREATED`: Request submitted by patient; validated by Python backend.
+   - `DISPATCHING`: Dispatch engine broadcasting offer to eligible verified drivers within sector.
+   - `ACCEPTED`: A verified driver has accepted the assignment and is navigating to the patient pickup location.
+   - `PICKUP_ARRIVED`: Driver has arrived at the patient's community or pickup landmark.
+   - `PATIENT_ONBOARD`: Expectant mother has safely boarded the vehicle. (Emergency cancellation is strictly locked out beyond this point).
+   - `IN_TRANSIT`: Vehicle is en route to designated healthcare facility.
+   - `ARRIVED`: Vehicle has arrived at healthcare facility entrance. **`ARRIVED` does not automatically mean `COMPLETED`**.
+   - `COMPLETED`: Patient has been safely transferred to an authorized facility representative via explicit operational handover (`completeHandover`).
+
+2. **Optional State:**
+   - `HOSPITAL_SELECTED`: Optional milestone if facility destination is assigned or modified dynamically en route. If facility is fixed at request time, the journey transitions directly from `PATIENT_ONBOARD` to `IN_TRANSIT`.
+
+3. **Presentational (Client Display Only):**
+   - `HEADING_TO_PICKUP`: Presentational label displayed in the mobile client while backend state is `ACCEPTED`. The client must **never** send `HEADING_TO_PICKUP` as a backend state transition target.
 
 ### Exception & Terminal States:
 - `CANCELLED`: Permitted only while in `CREATED`, `DISPATCHING`, `ACCEPTED`, or `PICKUP_ARRIVED`. Forbidden after `PATIENT_ONBOARD`.
@@ -362,12 +379,86 @@ Ordinary drivers and motorcycle riders coordinate maternal emergency transport. 
 
 ### 5.4 Active Journey Milestone Progression
 - **`GET /api/v1/responder/journey/active`**
-  - **Returns:** Active `EmergencyRequest` or `null`.
+  - **Headers:** `Authorization: Bearer <token>`
+  - **Returns:** Active ongoing `EmergencyRequest` or `null`. Used for app launch state restoration and crash recovery.
 - **`POST /api/v1/responder/journey/:emergencyId/milestone`**
-  - **Body:** `{ targetState: 'PICKUP_ARRIVED' | 'PATIENT_ONBOARD' | 'IN_TRANSIT' | 'ARRIVED', notes?: string }`
-  - **Guards:** Validates sequential progression strictly against the state machine. Rejects invalid jumps with `400 Bad Request` (`INVALID_STATE_TRANSITION`).
+  - **Headers:** `Authorization: Bearer <token>`
+  - **Body:** `{ targetState: 'PICKUP_ARRIVED' | 'PATIENT_ONBOARD' | 'HOSPITAL_SELECTED' | 'IN_TRANSIT' | 'ARRIVED', notes?: string }`
+  - **Guards:**
+    - Validates sequential progression strictly against the state machine.
+    - Rejects invalid jumps with `400 Bad Request` (`INVALID_STATE_TRANSITION`).
+    - Attempting to pass `targetState: "COMPLETED"` is **strictly forbidden** and returns `400 Bad Request` (`INVALID_STATE_TRANSITION` / `HANDOVER_REQUIRED`). Completion requires explicit facility reception handover.
 - **`POST /api/v1/responder/journey/:emergencyId/handover`**
-  - **Body:** `{ handoverNotes?: string }`
-  - **Guards:** Permitted ONLY when emergency state is `ARRIVED`. Rejects premature completion.
+  - **Headers:** `Authorization: Bearer <token>`
+  - **Body:** `{ handoverNotes?: string, receivingStaffName?: string, receivingStaffRole?: string }`
+  - **Domain Boundary:** Commercial drivers confirm physical arrival and safe transfer of the expectant mother to an authorized facility representative. Drivers **never** record medical triage, clinical diagnosis, or obstetric examinations.
+  - **Guards:** Permitted ONLY when emergency state is `ARRIVED`. Rejects premature completion with `400 Bad Request` (`INVALID_STATE_TRANSITION`).
   - **Returns:** Emergency marked `COMPLETED` and increments responder's completed trip statistics.
+
+### 5.5 Driver Document Verification & Compliance
+- **`POST /api/v1/responder/documents`**
+  - **Headers:** `Authorization: Bearer <token>`
+  - **Body (Multipart/Form-Data or JSON with pre-signed URL):**
+    ```json
+    {
+      "documentType": "DRIVERS_LICENSE", // "DRIVERS_LICENSE" | "VEHICLE_INSURANCE" | "ROADWORTHINESS" | "COMMUNITY_VERIFICATION"
+      "documentNumber": "DL-ABJ-498210",
+      "expiryDate": "2028-12-31",
+      "fileUrl": "https://storage.provider.com/docs/dl-498210.pdf"
+    }
+    ```
+  - **Lifecycle:** Review status managed by admin dispatch (`PENDING` -> `VERIFIED` | `SUSPENDED`).
+
+### 5.6 Device Push Notification Registration
+- **`POST /api/v1/responder/devices/push-token`**
+  - **Headers:** `Authorization: Bearer <token>`
+  - **Body:**
+    ```json
+    {
+      "devicePushToken": "ExponentPushToken[xxxxxxxxxxxxxx]",
+      "platform": "ANDROID", // "ANDROID" | "IOS" | "WEB"
+      "appVersion": "1.0.0"
+    }
+    ```
+  - **Description:** Registers high-priority notification channels for wake-on-offer background alerts.
+
+### 5.7 Responder Real-Time WebSocket Protocol & Reconnection
+- **Endpoint:** `wss://<host>/api/v1/ws/responder?token=<jwt>`
+- **Handshake Authentication:** Authenticated via JWT bearer in query string `?token=...` or standard `Authorization` header during HTTP upgrade.
+- **Heartbeat & Keep-Alive:** Client and server exchange `{ "type": "ping" }` / `{ "type": "pong" }` every 25 seconds.
+- **Missed Events Replay & Sequence Recovery:**
+  - Upon reconnection, client sends:
+    ```json
+    {
+      "action": "resume",
+      "lastEventSequence": 42,
+      "lastEventTimestamp": "2026-11-10T14:22:00Z"
+    }
+    ```
+  - Server replays any missed dispatch offers, active journey updates, or reassignments occurring during temporary disconnection.
+
+### 5.8 Concurrent Offer Acceptance & Expiry Resolution
+- When an emergency offer is broadcast to multiple drivers in a sector:
+  - Acceptance is an atomic backend transaction.
+  - First driver to confirm receives `200 OK` with the assigned `EmergencyRequest`.
+  - Subsequent or concurrent acceptances receive `409 Conflict` with error code `OFFER_UNAVAILABLE` (`"Another verified driver in your sector has accepted this emergency request"`).
+  - If the countdown window elapses prior to receipt, backend returns `409 Conflict` with `OFFER_EXPIRED`.
+
+### 5.9 Responder Service Statistics Contract
+- **`GET /api/v1/responder/stats`**
+  - **Headers:** `Authorization: Bearer <token>`
+  - **Response:**
+    ```json
+    {
+      "success": true,
+      "data": {
+        "completedTripsToday": 3,
+        "totalCompletedTrips": 50,
+        "averageRating": 4.9,
+        "hoursOnlineToday": 4.5,
+        "acceptanceRatePercent": 96
+      }
+    }
+    ```
+  - All statistics are computed authoritatively by the Python backend dispatch engine. During development, client interfaces label this as simulated development data until production database sync.
 
