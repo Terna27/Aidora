@@ -74,6 +74,38 @@ export const colors = {
     textMuted: '#94A3B8',    // Slate 400 for helper labels
   },
 
+  // Dispatcher Dashboard Theme Tokens (Pixel-matched to Aidline specification)
+  dispatcher: {
+    sidebarBg: '#0f1a2c',
+    sidebarActiveBg: '#1b2940',
+    sidebarUserBg: '#17263d',
+    sidebarAvatarBg: '#2d405d',
+    sidebarTextMuted: '#8e9aa8',
+    workspaceBg: '#f6f7fb',
+    cardBorder: '#e7ecf0',
+    textNavy: '#0f1a2c',
+    textMuted: '#667085',
+    textSecondary: '#344054',
+    badgeDispatch: '#175cd3',
+    badgeCritical: '#df2b1a',
+    badgeUrgentBg: '#ffefc9',
+    badgeUrgentText: '#7e2e0d',
+    badgeStableBg: '#e8f0fd',
+    badgeStableText: '#084681',
+    statCritical: '#b22710',
+    statUrgent: '#9a3507',
+    statEnRoute: '#0c1b30',
+    statAvailable: '#006339',
+    btnAssignRed: '#df2b1d',
+    btnDispatchRed: '#d92d1f',
+    unitAvailable: '#12b76a',
+    unitReturning: '#f79009',
+    enRouteText: '#064884',
+    mapGrid: '#edf4fc',
+    mapGridLine: '#dbe7f4',
+    selectedRowBg: '#fff5f5',
+  },
+
   // Safety & Warning Disclaimer
   safety: {
     bannerBg: '#FEF3C7',
