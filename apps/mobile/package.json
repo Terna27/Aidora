@@ -23,7 +23,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "tsx --test tests/patient-journey.test.ts tests/responder-journey.test.ts",
+    "test": "tsx --test tests/patient-journey.test.ts tests/responder-journey.test.ts tests/dispatcher-journey.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "private": true

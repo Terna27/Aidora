@@ -39,7 +39,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
   // Handover modal state
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   const [handoverNotes, setHandoverNotes] = useState(
-    'Patient safely handed over to facility maternal emergency triage team.'
+    'Patient transportation completed; safely received by authorized facility representative.'
   );
 
   if (!activeJourney) {
@@ -129,35 +129,32 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     }
   };
 
-  // 8-step visual milestone mapping
+  // Authoritative operational journey milestones (6 stages)
   const JOURNEY_STEPS = [
-    { key: 'ACCEPTED', label: 'Accepted', icon: '1' },
-    { key: 'HEADING_TO_PICKUP', label: 'En Route', icon: '2' },
-    { key: 'PICKUP_ARRIVED', label: 'At Pickup', icon: '3' },
-    { key: 'PATIENT_ONBOARD', label: 'Onboard', icon: '4' },
-    { key: 'HOSPITAL_SELECTED', label: 'Clinic Set', icon: '5' },
-    { key: 'IN_TRANSIT', label: 'In Transit', icon: '6' },
-    { key: 'ARRIVED', label: 'At Clinic', icon: '7' },
-    { key: 'COMPLETED', label: 'Completed', icon: '8' },
+    { key: 'ACCEPTED', label: 'En Route', icon: '1' },
+    { key: 'PICKUP_ARRIVED', label: 'At Pickup', icon: '2' },
+    { key: 'PATIENT_ONBOARD', label: 'Onboard', icon: '3' },
+    { key: 'IN_TRANSIT', label: 'In Transit', icon: '4' },
+    { key: 'ARRIVED', label: 'At Clinic', icon: '5' },
+    { key: 'COMPLETED', label: 'Handover', icon: '6' },
   ];
 
-  // Helper to determine step completion index
+  // Helper to determine step completion index strictly against authoritative states
   const getStepProgressIndex = (status: EmergencyState): number => {
     switch (status) {
       case 'ACCEPTED':
-        return 1; // Step 1 & 2 active
+        return 0;
       case 'PICKUP_ARRIVED':
-        return 2;
+        return 1;
       case 'PATIENT_ONBOARD':
-        return 3;
       case 'HOSPITAL_SELECTED':
-        return 4;
+        return 2;
       case 'IN_TRANSIT':
-        return 5;
+        return 3;
       case 'ARRIVED':
-        return 6;
+        return 4;
       case 'COMPLETED':
-        return 7;
+        return 5;
       default:
         return 0;
     }
@@ -197,9 +194,9 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           <Text style={styles.statusHeading}>{meta.label}</Text>
           <Text style={styles.statusDescription}>{meta.description}</Text>
 
-          {/* 8-STEP PROGRESS TRACKER */}
+          {/* AUTHORITATIVE PROGRESS TRACKER */}
           <View style={styles.progressContainer}>
-            <Text style={styles.stepperTitle}>JOURNEY PROGRESSION MILESTONES (1-8)</Text>
+            <Text style={styles.stepperTitle}>AUTHORITATIVE JOURNEY MILESTONES (1-6)</Text>
             <View style={styles.stepperRow}>
               {JOURNEY_STEPS.map((step, idx) => {
                 const isPassed = idx <= currentStepIdx;
@@ -253,7 +250,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
             <Text style={styles.completedIcon}>🎉</Text>
             <Text style={styles.completedTitle}>Handover Completed!</Text>
             <Text style={styles.completedSub}>
-              You have successfully completed this maternal emergency transportation. Patient has been safely transferred to facility clinical care.
+              You have successfully completed this maternal emergency transportation. Patient has been safely transferred to authorized facility personnel.
             </Text>
             <Button
               title="Return to Dashboard (Ready for Next Ride)"
@@ -495,7 +492,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
 
             {activeJourney.status === 'ARRIVED' ? (
               <Button
-                title="✅ Complete Emergency Handover to Staff"
+                title="✅ Confirm Facility Operational Handover"
                 variant="primary"
                 size="lg"
                 loading={advancing}
@@ -516,24 +513,24 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
       >
         <View style={styles.modalOverlay}>
           <View style={styles.handoverModalCard}>
-            <Text style={styles.handoverModalTitle}>Emergency Triage Handover</Text>
+            <Text style={styles.handoverModalTitle}>Facility Operational Handover</Text>
             <Text style={styles.handoverModalSub}>
-              Confirm that you have safely arrived at {activeJourney.destinationFacility?.name || 'the healthcare facility'} and handed over the patient to clinical staff.
+              Confirm that you have safely arrived at {activeJourney.destinationFacility?.name || 'the healthcare facility'} and transferred the patient to an authorized facility representative.
             </Text>
 
-            <Text style={styles.handoverInputLabel}>Handover Triage Notes:</Text>
+            <Text style={styles.handoverInputLabel}>Facility Staff / Representative (Optional):</Text>
             <TextInput
               style={styles.handoverInput}
               value={handoverNotes}
               onChangeText={setHandoverNotes}
               multiline
-              numberOfLines={3}
-              placeholder="e.g. Patient received by Nurse Chioma at Maternity Triage desk."
+              numberOfLines={2}
+              placeholder="e.g. Received by maternity intake desk / Nurse on duty."
             />
 
             <View style={styles.handoverModalActions}>
               <Button
-                title="Confirm Handover Completion"
+                title="Confirm Facility Handover"
                 variant="primary"
                 size="lg"
                 loading={advancing}

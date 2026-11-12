@@ -108,8 +108,12 @@ export class ResponderAuthApiService implements IResponderAuthService {
   }
 
   async loginAsDemo(responderId = 'resp-201'): Promise<{ responder: ResponderProfile; token: string }> {
-    // In production against the Python backend, demo login requests sample credentials
-    return this.login(responderId === 'resp-202' ? '08024445566' : '08031112233', 'password123');
+    // In production against the Python backend, demo shortcuts are strictly rejected
+    throw new ApiError(
+      'Demo authentication is strictly disabled in production environments. Please sign in with registered driver credentials.',
+      'DEMO_AUTH_DISABLED',
+      403
+    );
   }
 
   async register(payload: ResponderRegisterPayload): Promise<{ responder: ResponderProfile; token: string }> {
@@ -257,6 +261,13 @@ export class ResponderJourneyApiService implements IResponderJourneyService {
     responderId: string,
     targetState: EmergencyState
   ): Promise<EmergencyRequest> {
+    if (targetState === 'COMPLETED') {
+      throw new ApiError(
+        'Direct transition to COMPLETED via milestone progression is forbidden. Explicit facility handover via completeHandover() is required.',
+        'INVALID_STATE_TRANSITION',
+        400
+      );
+    }
     return await httpHelper.request<EmergencyRequest>(
       API_ENDPOINTS.RESPONDER_JOURNEY_MILESTONE(emergencyId),
       {

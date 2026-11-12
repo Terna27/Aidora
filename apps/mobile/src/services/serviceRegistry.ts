@@ -10,6 +10,7 @@ import {
   IResponderJourneyService,
 } from './mock/mockResponderJourneyService';
 import { notificationService, INotificationService } from './notification/notificationService';
+import { dispatcherService, IDispatcherService } from './dispatcher/dispatcherService';
 import {
   ResponderAuthApiService,
   ResponderJourneyApiService,
@@ -30,6 +31,7 @@ export type {
   IResponderAuthService,
   IResponderJourneyService,
   INotificationService,
+  IDispatcherService,
 };
 
 // Specialized Domain Service Interfaces
@@ -93,6 +95,7 @@ export interface ServiceRegistry {
   emergencyOfferService: IEmergencyOfferService;
   journeyService: IJourneyService;
   notificationService: INotificationService;
+  dispatcherService: IDispatcherService;
   isMock: boolean;
 }
 
@@ -102,6 +105,7 @@ export const serviceRegistry: ServiceRegistry = {
   locationService: locationService,
   responderAuthService: activeResponderAuthService,
   responderJourneyService: activeResponderJourneyService,
+  dispatcherService: dispatcherService,
   responderProfileService: {
     getProfile: () => activeResponderAuthService.getProfile(),
     updateProfile: (updates) => activeResponderAuthService.updateProfile(updates),
