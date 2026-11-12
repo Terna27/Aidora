@@ -9,7 +9,7 @@ import { LocationData, HealthcareFacility, EmergencyState } from './emergency';
 
 export type VerificationStatus = 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'SUSPENDED';
 
-export type VehicleType = 'MOTORCYCLE' | 'TAXI';
+export type VehicleType = 'MOTORCYCLE' | 'TRICYCLE' | 'TAXI';
 
 export interface ResponderVehicle {
   vehicleType: VehicleType;
@@ -64,12 +64,15 @@ export interface ResponderStats {
 export interface ResponderRegisterPayload {
   fullName: string;
   phoneNumber: string;
+  email?: string;
   password?: string;
+  confirmPassword?: string;
   vehicleType: VehicleType;
   vehicleMakeModel: string;
   licensePlate: string;
   vehicleColor: string;
   driverLicenseNumber: string;
+  documentReference?: string;
   communityBase?: string;
   agreedToTerms: boolean;
 }

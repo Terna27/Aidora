@@ -1,0 +1,17 @@
+{
+  "name": "aidline-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/mobile",
+    "apps/web"
+  ],
+  "scripts": {
+    "test": "npm run test:mobile && npm run test:web",
+    "test:mobile": "npm run test --workspace=apps/mobile",
+    "test:web": "npm run test --workspace=apps/web",
+    "build:web": "npm run build --workspace=apps/web",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "typecheck:web": "npm run typecheck --workspace=apps/web",
+    "typecheck:mobile": "npm run typecheck --workspace=apps/mobile"
+  }
+}

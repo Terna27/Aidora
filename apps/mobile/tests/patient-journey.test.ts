@@ -61,6 +61,34 @@ describe('RideRoute Patient Mobile Journey — Quality Audit & Regression Suite'
         return true;
       }
     );
+
+    // Password mismatch
+    await assert.rejects(
+      async () => {
+        await authService.register({
+          fullName: 'Aisha Garba',
+          phoneNumber: '08023456789',
+          password: 'secretPassword1',
+          confirmPassword: 'differentPassword2',
+        });
+      },
+      (err: any) => {
+        assert.equal(err.code, 'PASSWORD_MISMATCH');
+        return true;
+      }
+    );
+
+    // Valid registration with email and confirmed password
+    const emailReg = await authService.register({
+      fullName: 'Aisha Garba',
+      phoneNumber: '08023456780',
+      email: 'aisha@example.com',
+      password: 'secretPassword1',
+      confirmPassword: 'secretPassword1',
+      communityOrVillage: 'Kubwa',
+      agreedToTerms: true,
+    });
+    assert.equal(emailReg.patient.email, 'aisha@example.com');
   });
 
   // 3. Patient Login & Demo Fast-Track

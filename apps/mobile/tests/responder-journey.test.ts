@@ -63,6 +63,49 @@ describe('RideRoute Responder Mobile Journey — Quality Audit & Regression Suit
     assert.equal(taxiReg.responder.verificationStatus, 'PENDING');
     assert.equal(await journeyService.getAvailability(taxiReg.responder.id), 'OFFLINE');
 
+    // Tricycle registration
+    const trikeReg = await authService.register({
+      fullName: 'Emeka Nwosu',
+      phoneNumber: '08091112233',
+      vehicleType: 'TRICYCLE',
+      licensePlate: 'ABJ-778-TR',
+      vehicleMakeModel: 'TVS King Deluxe',
+      vehicleColor: 'Yellow',
+      driverLicenseNumber: 'DL-889900-TR',
+      documentReference: 'VIO-2026-TR-12',
+      communityBase: 'Kado Village',
+      password: 'password123',
+      confirmPassword: 'password123',
+      agreedToTerms: true,
+    });
+
+    assert.ok(trikeReg.responder.id);
+    assert.equal(trikeReg.responder.fullName, 'Emeka Nwosu');
+    assert.equal(trikeReg.responder.vehicle.vehicleType, 'TRICYCLE');
+    assert.equal(trikeReg.responder.verificationStatus, 'PENDING');
+
+    // Password mismatch rejection
+    await assert.rejects(
+      async () => {
+        await authService.register({
+          fullName: 'Emeka Nwosu',
+          phoneNumber: '08091112233',
+          vehicleType: 'TRICYCLE',
+          licensePlate: 'ABJ-778-TR',
+          vehicleMakeModel: 'TVS King Deluxe',
+          vehicleColor: 'Yellow',
+          driverLicenseNumber: 'DL-889900-TR',
+          password: 'password123',
+          confirmPassword: 'differentPassword456',
+          agreedToTerms: true,
+        });
+      },
+      (err: any) => {
+        assert.equal(err.code, 'PASSWORD_MISMATCH');
+        return true;
+      }
+    );
+
     // Terms agreement enforcement (must acknowledge non-medical transportation role)
     await assert.rejects(
       async () => {

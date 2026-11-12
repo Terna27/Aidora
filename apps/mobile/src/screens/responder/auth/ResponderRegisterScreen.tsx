@@ -31,13 +31,16 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
 
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [vehicleType, setVehicleType] = useState<VehicleType>('MOTORCYCLE');
   const [makeModel, setMakeModel] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
   const [color, setColor] = useState('');
   const [driverLicenseNumber, setDriverLicenseNumber] = useState('');
+  const [documentReference, setDocumentReference] = useState('');
   const [communityBase, setCommunityBase] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('🏍️');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
@@ -72,6 +75,11 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
       return;
     }
 
+    if (password && confirmPassword && password !== confirmPassword) {
+      setErrorMessage('Passwords do not match.');
+      return;
+    }
+
     if (!agreedToTerms) {
       setErrorMessage('You must acknowledge that you coordinate transportation and are not a medical professional.');
       return;
@@ -82,13 +90,16 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
       await register({
         fullName: fullName.trim(),
         phoneNumber: phoneNumber.trim(),
+        email: email.trim() || undefined,
         vehicleType,
         vehicleMakeModel: makeModel.trim(),
         licensePlate: licensePlate.trim(),
         vehicleColor: color.trim() || 'Standard',
         driverLicenseNumber: driverLicenseNumber.trim(),
+        documentReference: documentReference.trim() || undefined,
         communityBase: communityBase.trim() || 'Central',
         password,
+        confirmPassword,
         agreedToTerms,
       });
       onRegisterSuccess();
@@ -156,6 +167,15 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
         />
 
         <Input
+          label="Email Address (Optional)"
+          placeholder="e.g. driver@example.com"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+
+        <Input
           label="Home Community / Base Area"
           placeholder="e.g. Karu, Nyanya, Garki"
           value={communityBase}
@@ -186,9 +206,29 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
                 vehicleType === 'MOTORCYCLE' && styles.vehicleTypeTextActive,
               ]}
             >
-              Motorcycle (Okada)
+              Motorcycle
             </Text>
-            <Text style={styles.vehicleTypeSub}>Fastest rural access</Text>
+            <Text style={styles.vehicleTypeSub}>Fastest rural</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.vehicleTypeCard,
+              vehicleType === 'TRICYCLE' && styles.vehicleTypeCardActive,
+            ]}
+            onPress={() => setVehicleType('TRICYCLE')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.vehicleIcon}>🛺</Text>
+            <Text
+              style={[
+                styles.vehicleTypeText,
+                vehicleType === 'TRICYCLE' && styles.vehicleTypeTextActive,
+              ]}
+            >
+              Tricycle
+            </Text>
+            <Text style={styles.vehicleTypeSub}>Covered Keke</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -208,13 +248,13 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
             >
               Taxi / Car
             </Text>
-            <Text style={styles.vehicleTypeSub}>Enclosed passenger cabin</Text>
+            <Text style={styles.vehicleTypeSub}>Enclosed cabin</Text>
           </TouchableOpacity>
         </View>
 
         <Input
           label="Vehicle Make & Model"
-          placeholder={vehicleType === 'MOTORCYCLE' ? 'e.g. Bajaj Boxer 150' : 'e.g. Toyota Corolla 2008'}
+          placeholder={vehicleType === 'MOTORCYCLE' ? 'e.g. Bajaj Boxer 150' : vehicleType === 'TRICYCLE' ? 'e.g. TVS King Deluxe' : 'e.g. Toyota Corolla 2008'}
           value={makeModel}
           onChangeText={setMakeModel}
           required
@@ -231,7 +271,7 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
 
         <Input
           label="Vehicle Color"
-          placeholder="e.g. Black, Silver, Blue"
+          placeholder="e.g. Black, Silver, Blue, Yellow"
           value={color}
           onChangeText={setColor}
         />
@@ -246,10 +286,26 @@ export const ResponderRegisterScreen: React.FC<ResponderRegisterScreenProps> = (
         />
 
         <Input
+          label="Verification Document Slip / Inspection ID (Optional)"
+          placeholder="e.g. VIO-INSP-2026-99"
+          value={documentReference}
+          onChangeText={setDocumentReference}
+          helperText="Reference number from union or VIO inspection certificate"
+        />
+
+        <Input
           label="Create Account Password (Optional for Demo)"
           placeholder="Choose a password"
           value={password}
           onChangeText={setPassword}
+          secureTextEntry
+        />
+
+        <Input
+          label="Confirm Password"
+          placeholder="Repeat your password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
           secureTextEntry
         />
 

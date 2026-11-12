@@ -100,6 +100,10 @@ export class MockResponderAuthService implements IResponderAuthService {
       throw new ApiError('Valid driver license number required', 'INVALID_LICENSE', 400);
     }
 
+    if (payload.password && payload.confirmPassword && payload.password !== payload.confirmPassword) {
+      throw new ApiError('Passwords do not match', 'PASSWORD_MISMATCH', 400);
+    }
+
     if (!payload.agreedToTerms) {
       throw new ApiError(
         'You must acknowledge that you provide transportation, not medical care',

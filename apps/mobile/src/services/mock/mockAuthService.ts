@@ -73,6 +73,10 @@ export class MockAuthService implements IAuthService {
       throw new ApiError('Please enter a valid phone number (at least 8 digits)', 'INVALID_PHONE', 400);
     }
 
+    if (payload.password && payload.confirmPassword && payload.password !== payload.confirmPassword) {
+      throw new ApiError('Passwords do not match', 'PASSWORD_MISMATCH', 400);
+    }
+
     const contacts: EmergencyContact[] = [];
     if (payload.emergencyContactName && payload.emergencyContactPhone) {
       contacts.push({
@@ -88,6 +92,7 @@ export class MockAuthService implements IAuthService {
       id: `pat-${Date.now().toString().slice(-4)}`,
       fullName: payload.fullName.trim(),
       phoneNumber: cleanPhone,
+      email: payload.email?.trim() || undefined,
       role: 'PATIENT',
       communityOrVillage: payload.communityOrVillage?.trim(),
       emergencyContacts: contacts,

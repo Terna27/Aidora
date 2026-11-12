@@ -43,7 +43,7 @@ export interface LocationData {
   capturedAt: string;
 }
 
-export type VehicleType = 'MOTORCYCLE' | 'TAXI';
+export type VehicleType = 'MOTORCYCLE' | 'TRICYCLE' | 'TAXI';
 
 export interface ResponderInfo {
   id: string;

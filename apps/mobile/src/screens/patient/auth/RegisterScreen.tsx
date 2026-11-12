@@ -29,11 +29,13 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const { register } = useAuth();
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [community, setCommunity] = useState('');
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [contactRelation, setContactRelation] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [understoodTerms, setUnderstoodTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -51,8 +53,13 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       return;
     }
 
+    if (password && confirmPassword && password !== confirmPassword) {
+      setErrorMessage('Passwords do not match');
+      return;
+    }
+
     if (!understoodTerms) {
-      setErrorMessage('Please confirm that you understand RideRoute coordinates transportation and is not an ambulance or medical service.');
+      setErrorMessage('Please confirm that you understand Aidora coordinates transportation and is not an ambulance or medical service.');
       return;
     }
 
@@ -61,11 +68,14 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       await register({
         fullName: fullName.trim(),
         phoneNumber: phoneNumber.trim(),
+        email: email.trim() || undefined,
         communityOrVillage: community.trim(),
         emergencyContactName: contactName.trim(),
         emergencyContactPhone: contactPhone.trim(),
         emergencyContactRelationship: contactRelation.trim() || 'Family',
         password,
+        confirmPassword,
+        agreedToTerms: understoodTerms,
       });
       onRegisterSuccess();
     } catch (err: unknown) {
@@ -117,6 +127,15 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
         />
 
         <Input
+          label="Email Address (Optional)"
+          placeholder="e.g. fatima@example.com"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+
+        <Input
           label="Community, Village or Settlement Area"
           placeholder="e.g. Karu Village, Nyanya Gwandara"
           value={community}
@@ -162,6 +181,14 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
           secureTextEntry
         />
 
+        <Input
+          label="Confirm Password"
+          placeholder="Repeat your password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+        />
+
         <SafetyBanner />
 
         {/* UNDERSTOOD TERMS CHECKBOX */}
@@ -174,7 +201,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
             {understoodTerms ? <Text style={styles.checkmark}>✓</Text> : null}
           </View>
           <Text style={styles.termsText}>
-            I confirm that I understand RideRoute coordinates emergency transportation with local drivers. Responders are transportation providers, not doctors or paramedics.
+            I confirm that I understand Aidora coordinates emergency transportation with local drivers. Responders are transportation providers, not doctors or paramedics.
           </Text>
         </TouchableOpacity>
 
