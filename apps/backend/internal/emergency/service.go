@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var ErrInvalidLocation = errors.New("invalid pickup location")
+
 type CreateRequest struct {
 	Source           LocationSource `json:"source"`
 	Latitude         *float64       `json:"latitude"`
@@ -62,7 +64,7 @@ func (service *Service) Create(
 	}
 
 	if err := emergency.ValidateLocation(); err != nil {
-		return CreateResult{}, fmt.Errorf("invalid pickup location: %w", err)
+		return CreateResult{}, fmt.Errorf("%w: %v", ErrInvalidLocation, err)
 	}
 
 	// Hash the normalized request, not the raw JSON supplied by the client.
