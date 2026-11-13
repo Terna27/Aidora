@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Terna27/Aidora/apps/backend/internal/api"
 	"github.com/Terna27/Aidora/apps/backend/internal/database"
 	"github.com/go-chi/chi/v5"
 )
@@ -96,17 +96,11 @@ func run() error {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := APIResponse{
-		Success: true,
-		Data: map[string]string{
-			"status": "ok",
-		},
+	data := map[string]string{
+		"status": "ok",
 	}
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("failed to encode health response: %v", err)
+	if err := api.WriteSuccess(w, http.StatusOK, data); err != nil {
+		log.Printf("failed to write health response: %v", err)
 	}
 }
