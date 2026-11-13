@@ -628,3 +628,212 @@ func TestRepositoryAddRoleReturnsUnexpectedDatabaseError(t *testing.T) {
 		t.Errorf("expected PostgreSQL error code P0001, got %q", pgErr.Code)
 	}
 }
+
+func createAuthTestUserWithIdentifiers(
+	t *testing.T,
+	repo *Repository,
+	email string,
+	phoneNumber string,
+) User {
+	t.Helper()
+
+	passwordHash, err := HashPassword("IntegrationPassword123!")
+	if err != nil {
+		t.Fatalf("hash test password: %v", err)
+	}
+
+	user, err := repo.CreateUser(context.Background(), CreateUserInput{
+		FullName:     "Optional Identifier Test User",
+		Email:        email,
+		PhoneNumber:  phoneNumber,
+		PasswordHash: passwordHash,
+		Role:         "patient",
+	})
+	if err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, err := repo.pool.Exec(
+			context.Background(),
+			`DELETE FROM users WHERE id = $1`,
+			user.ID,
+		)
+		if err != nil {
+			t.Errorf("clean up test user: %v", err)
+		}
+	})
+
+	return user
+}
+
+func TestRepositoryCreateUserWithEmailOnly(t *testing.T) {
+	pool := newAuthIntegrationPool(t)
+	repo := NewRepository(pool)
+
+	email := fmt.Sprintf(
+		"email-only-%d@example.test",
+		time.Now().UnixNano(),
+	)
+
+	user := createAuthTestUserWithIdentifiers(
+		t,
+		repo,
+		email,
+		"",
+	)
+
+	if user.Email != email {
+		t.Errorf("expected email %q, got %q", email, user.Email)
+	}
+
+	if user.PhoneNumber != "" {
+		t.Errorf("expected empty phone number, got %q", user.PhoneNumber)
+	}
+
+	// Verify that PostgreSQL stored NULL, not an empty string.
+	var phoneIsNull bool
+
+	err := pool.QueryRow(
+		context.Background(),
+		`SELECT phone_number IS NULL FROM users WHERE id = $1`,
+		user.ID,
+	).Scan(&phoneIsNull)
+
+	if err != nil {
+		t.Fatalf("check phone number NULL value: %v", err)
+	}
+
+	if !phoneIsNull {
+		t.Error("expected phone_number to be NULL in database")
+	}
+
+	// Verify email lookup.
+	found, err := repo.GetUserByEmail(context.Background(), email)
+	if err != nil {
+		t.Fatalf("get user by email: %v", err)
+	}
+
+	if found.ID != user.ID {
+		t.Errorf("expected user ID %q, got %q", user.ID, found.ID)
+	}
+}
+
+func TestRepositoryCreateUserWithPhoneOnly(t *testing.T) {
+	pool := newAuthIntegrationPool(t)
+	repo := NewRepository(pool)
+
+	phoneNumber := fmt.Sprintf(
+		"+1999%d",
+		time.Now().UnixNano(),
+	)
+
+	user := createAuthTestUserWithIdentifiers(
+		t,
+		repo,
+		"",
+		phoneNumber,
+	)
+
+	if user.PhoneNumber != phoneNumber {
+		t.Errorf(
+			"expected phone number %q, got %q",
+			phoneNumber,
+			user.PhoneNumber,
+		)
+	}
+
+	if user.Email != "" {
+		t.Errorf("expected empty email, got %q", user.Email)
+	}
+
+	// Verify that PostgreSQL stored NULL, not an empty string.
+	var emailIsNull bool
+
+	err := pool.QueryRow(
+		context.Background(),
+		`SELECT email IS NULL FROM users WHERE id = $1`,
+		user.ID,
+	).Scan(&emailIsNull)
+
+	if err != nil {
+		t.Fatalf("check email NULL value: %v", err)
+	}
+
+	if !emailIsNull {
+		t.Error("expected email to be NULL in database")
+	}
+
+	// Verify phone number lookup.
+	found, err := repo.GetUserByPhoneNumber(
+		context.Background(),
+		phoneNumber,
+	)
+	if err != nil {
+		t.Fatalf("get user by phone number: %v", err)
+	}
+
+	if found.ID != user.ID {
+		t.Errorf("expected user ID %q, got %q", user.ID, found.ID)
+	}
+}
+
+func TestRepositoryCreateUserRejectsMissingBothIdentifiers(t *testing.T) {
+	pool := newAuthIntegrationPool(t)
+	repo := NewRepository(pool)
+
+	passwordHash, err := HashPassword("IntegrationPassword123!")
+	if err != nil {
+		t.Fatalf("hash test password: %v", err)
+	}
+
+	_, err = repo.CreateUser(context.Background(), CreateUserInput{
+		FullName:     "Missing Identifier User",
+		Email:        "",
+		PhoneNumber:  "",
+		PasswordHash: passwordHash,
+		Role:         "patient",
+	})
+
+	if err == nil {
+		t.Fatal("expected error when both email and phone number are missing")
+	}
+
+	if err.Error() != "email or phone number is required" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestRepositoryGetUserByEmailIsCaseInsensitive(t *testing.T) {
+	pool := newAuthIntegrationPool(t)
+	repo := NewRepository(pool)
+
+	email := fmt.Sprintf(
+		"case-test-%d@example.test",
+		time.Now().UnixNano(),
+	)
+
+	user := createAuthTestUserWithIdentifiers(
+		t,
+		repo,
+		email,
+		"",
+	)
+
+	// Search using uppercase characters.
+	found, err := repo.GetUserByEmail(
+		context.Background(),
+		strings.ToUpper(email),
+	)
+	if err != nil {
+		t.Fatalf("get user using uppercase email: %v", err)
+	}
+
+	if found.ID != user.ID {
+		t.Errorf(
+			"expected user ID %q, got %q",
+			user.ID,
+			found.ID,
+		)
+	}
+}

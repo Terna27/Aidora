@@ -62,26 +62,49 @@ func (r *Repository) CreateUser(
 	ctx context.Context,
 	input CreateUserInput,
 ) (User, error) {
-	if strings.TrimSpace(input.FullName) == "" {
+	fullName := strings.TrimSpace(input.FullName)
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	phoneNumber := strings.TrimSpace(input.PhoneNumber)
+	passwordHash := strings.TrimSpace(input.PasswordHash)
+
+	// Validate required fields.
+	if fullName == "" {
 		return User{}, errors.New("full name is required")
 	}
-	if strings.TrimSpace(input.Email) == "" {
-		return User{}, errors.New("email is required")
+
+	// At least one login identifier must be provided.
+	if email == "" && phoneNumber == "" {
+		return User{}, errors.New("email or phone number is required")
 	}
-	if strings.TrimSpace(input.PhoneNumber) == "" {
-		return User{}, errors.New("phone number is required")
-	}
-	if strings.TrimSpace(input.PasswordHash) == "" {
+
+	if passwordHash == "" {
 		return User{}, errors.New("password hash is required")
 	}
+
 	if !validRole(input.Role) {
 		return User{}, ErrInvalidRole
 	}
 
+	// Use nil for missing identifiers so PostgreSQL stores NULL.
+	var emailValue any
+	if email != "" {
+		emailValue = email
+	}
+
+	var phoneValue any
+	if phoneNumber != "" {
+		phoneValue = phoneNumber
+	}
+
+	// Create the user and assign the initial role atomically.
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return User{}, fmt.Errorf("begin create user transaction: %w", err)
+		return User{}, fmt.Errorf(
+			"begin create user transaction: %w",
+			err,
+		)
 	}
+
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
@@ -99,16 +122,16 @@ func (r *Repository) CreateUser(
 		RETURNING
 			id::text,
 			full_name,
-			email,
-			phone_number,
+			COALESCE(email, ''),
+			COALESCE(phone_number, ''),
 			password_hash,
 			created_at,
 			updated_at
 	`,
-		input.FullName,
-		input.Email,
-		input.PhoneNumber,
-		input.PasswordHash,
+		fullName,
+		emailValue,
+		phoneValue,
+		passwordHash,
 	).Scan(
 		&user.ID,
 		&user.FullName,
@@ -127,11 +150,17 @@ func (r *Repository) CreateUser(
 		VALUES ($1, $2)
 	`, user.ID, input.Role)
 	if err != nil {
-		return User{}, fmt.Errorf("assign initial user role: %w", err)
+		return User{}, fmt.Errorf(
+			"assign initial user role: %w",
+			err,
+		)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return User{}, fmt.Errorf("commit create user transaction: %w", err)
+		return User{}, fmt.Errorf(
+			"commit create user transaction: %w",
+			err,
+		)
 	}
 
 	user.Roles = []string{input.Role}
@@ -157,9 +186,30 @@ func (r *Repository) GetUserByEmail(
 	ctx context.Context,
 	email string,
 ) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+
+	if email == "" {
+		return User{}, errors.New("email is required")
+	}
+
 	return r.getUser(ctx, `
-		WHERE u.email = $1
-	`, email)
+        WHERE LOWER(u.email) = $1
+    `, email)
+}
+
+func (r *Repository) GetUserByPhoneNumber(
+	ctx context.Context,
+	phoneNumber string,
+) (User, error) {
+	phoneNumber = strings.TrimSpace(phoneNumber)
+
+	if phoneNumber == "" {
+		return User{}, errors.New("phone number is required")
+	}
+
+	return r.getUser(ctx, `
+        WHERE u.phone_number = $1
+    `, phoneNumber)
 }
 
 func (r *Repository) getUser(
@@ -171,8 +221,8 @@ func (r *Repository) getUser(
 		SELECT
 			u.id::text,
 			u.full_name,
-			u.email,
-			u.phone_number,
+			COALESCE(u.email, ''),
+			COALESCE(u.phone_number, ''),
 			u.password_hash,
 			u.created_at,
 			u.updated_at,
