@@ -16,10 +16,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type APIResponse struct {
-	Success bool `json:"success"`
-	Data    any  `json:"data,omitempty"`
-}
 
 func main() {
 	if err := run(); err != nil {
