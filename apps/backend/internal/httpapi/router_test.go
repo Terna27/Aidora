@@ -51,6 +51,75 @@ type fakeCreator struct {
 	gotIdempotency string
 }
 
+type fakeAuthService struct{}
+
+var _ auth.AuthService = (*fakeAuthService)(nil)
+
+func (f *fakeAuthService) Register(
+	ctx context.Context,
+	input auth.RegisterInput,
+) (auth.PublicUser, error) {
+	return auth.PublicUser{}, nil
+}
+
+func (f *fakeAuthService) Login(
+	ctx context.Context,
+	input auth.LoginInput,
+) (auth.TokenPair, error) {
+	return auth.TokenPair{}, nil
+}
+
+func (f *fakeAuthService) Refresh(
+	ctx context.Context,
+	refreshToken string,
+) (auth.TokenPair, error) {
+	return auth.TokenPair{}, nil
+}
+
+func (f *fakeAuthService) Logout(
+	ctx context.Context,
+	refreshToken string,
+) error {
+	return nil
+}
+
+func (f *fakeAuthService) CurrentUser(
+	ctx context.Context,
+	userID string,
+) (auth.PublicUser, error) {
+	return auth.PublicUser{}, nil
+}
+
+func (f *fakeAuthService) RequestEmailVerification(
+	ctx context.Context,
+	email string,
+) error {
+	return nil
+}
+
+func (f *fakeAuthService) VerifyEmail(
+	ctx context.Context,
+	email string,
+	code string,
+) error {
+	return nil
+}
+
+func (f *fakeAuthService) RequestPhoneVerification(
+	ctx context.Context,
+	phone string,
+) error {
+	return nil
+}
+
+func (f *fakeAuthService) VerifyPhone(
+	ctx context.Context,
+	phone string,
+	code string,
+) error {
+	return nil
+}
+
 func (f *fakeCreator) Create(
 	ctx context.Context,
 	patientID string,
@@ -64,10 +133,20 @@ func (f *fakeCreator) Create(
 	return f.result, f.err
 }
 
-func newTestRouter(t *testing.T, authenticator auth.Authenticator, creator emergency.EmergencyCreator) http.Handler {
+func newTestRouter(
+	t *testing.T,
+	authenticator auth.Authenticator,
+	creator emergency.EmergencyCreator,
+) http.Handler {
 	t.Helper()
 
-	router, err := NewRouter(authenticator, emergency.NewHandler(creator))
+	authHandler := auth.NewHandler(&fakeAuthService{})
+
+	router, err := NewRouter(
+		authenticator,
+		authHandler,
+		emergency.NewHandler(creator),
+	)
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
@@ -275,14 +354,48 @@ func TestRouter_Emergencies_ForwardsAuthenticatedIdentity(t *testing.T) {
 }
 
 func TestNewRouter_RequiresDependencies(t *testing.T) {
-	handler := emergency.NewHandler(&fakeCreator{})
+	authHandler := auth.NewHandler(&fakeAuthService{})
+	emergencyHandler := emergency.NewHandler(&fakeCreator{})
+	authenticator := &fakeAuthenticator{}
 
-	if _, err := NewRouter(nil, handler); err == nil {
-		t.Error("NewRouter(nil authenticator) error = nil, want error")
+	tests := []struct {
+		name          string
+		authenticator auth.Authenticator
+		authHandler   *auth.Handler
+		emergency     *emergency.Handler
+	}{
+		{
+			name:          "nil authenticator",
+			authenticator: nil,
+			authHandler:   authHandler,
+			emergency:     emergencyHandler,
+		},
+		{
+			name:          "nil auth handler",
+			authenticator: authenticator,
+			authHandler:   nil,
+			emergency:     emergencyHandler,
+		},
+		{
+			name:          "nil emergency handler",
+			authenticator: authenticator,
+			authHandler:   authHandler,
+			emergency:     nil,
+		},
 	}
 
-	if _, err := NewRouter(&fakeAuthenticator{}, nil); err == nil {
-		t.Error("NewRouter(nil handler) error = nil, want error")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NewRouter(
+				test.authenticator,
+				test.authHandler,
+				test.emergency,
+			)
+
+			if err == nil {
+				t.Fatal("NewRouter() error = nil, want error")
+			}
+		})
 	}
 }
 

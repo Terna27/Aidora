@@ -12,15 +12,17 @@ import (
 )
 
 // NewRouter constructs the application HTTP router.
-//
-// Both dependencies are required. We must not register a protected
-// emergency endpoint without a real authentication implementation.
 func NewRouter(
 	authenticator auth.Authenticator,
+	authHandler *auth.Handler,
 	emergencyHandler *emergency.Handler,
 ) (http.Handler, error) {
 	if authenticator == nil {
 		return nil, errors.New("authenticator is required")
+	}
+
+	if authHandler == nil {
+		return nil, errors.New("authentication handler is required")
 	}
 
 	if emergencyHandler == nil {
@@ -31,9 +33,27 @@ func NewRouter(
 
 	router.Get("/health", healthHandler)
 
-	// All requests to this endpoint must pass authentication.
-	router.With(auth.Middleware(authenticator)).
-		Post("/api/v1/emergencies", emergencyHandler.Create)
+	// Public authentication endpoints.
+	// Public authentication endpoints.
+	router.Post("/api/v1/auth/register", authHandler.Register)
+	router.Post("/api/v1/auth/login", authHandler.Login)
+	router.Post("/api/v1/auth/refresh", authHandler.Refresh)
+
+	// Public identity verification endpoints.
+	router.Post("/api/v1/auth/verify/email/request", authHandler.RequestEmailVerification)
+	router.Post("/api/v1/auth/verify/email/confirm", authHandler.VerifyEmail)
+	router.Post("/api/v1/auth/verify/phone/request", authHandler.RequestPhoneVerification)
+	router.Post("/api/v1/auth/verify/phone/confirm", authHandler.VerifyPhone)
+
+	// Authentication is required for these endpoints.
+	router.Group(func(r chi.Router) {
+		r.Use(auth.Middleware(authenticator))
+
+		r.Post("/api/v1/auth/logout", authHandler.Logout)
+		r.Get("/api/v1/auth/me", authHandler.Me)
+
+		r.Post("/api/v1/emergencies", emergencyHandler.Create)
+	})
 
 	return router, nil
 }
