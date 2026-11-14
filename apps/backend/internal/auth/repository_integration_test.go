@@ -338,22 +338,32 @@ func TestRepositoryCreateUserRollsBackWhenRoleAssignmentFails(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Generate unique PostgreSQL object names for this test.
+	// Generate unique PostgreSQL object names and a unique test email.
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	functionName := "auth_test_fail_role_" + suffix
 	triggerName := "auth_test_fail_role_trigger_" + suffix
+	email := fmt.Sprintf("rollback-%s@example.test", suffix)
 
-	// Create a trigger function that deliberately rejects role assignment.
+	// Reject role assignment only for this test's user.
 	_, err := pool.Exec(ctx, fmt.Sprintf(`
 		CREATE FUNCTION %s()
 		RETURNS trigger
 		LANGUAGE plpgsql
 		AS $body$
 		BEGIN
-			RAISE EXCEPTION 'forced role assignment failure';
+			IF EXISTS (
+				SELECT 1
+				FROM users
+				WHERE id = NEW.user_id
+				  AND email = '%s'
+			) THEN
+				RAISE EXCEPTION 'forced role assignment failure';
+			END IF;
+
+			RETURN NEW;
 		END;
 		$body$;
-	`, functionName))
+	`, functionName, email))
 	if err != nil {
 		t.Fatalf("create test trigger function: %v", err)
 	}
@@ -391,8 +401,6 @@ func TestRepositoryCreateUserRollsBackWhenRoleAssignmentFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hash test password: %v", err)
 	}
-
-	email := fmt.Sprintf("rollback-%s@example.test", suffix)
 
 	_, err = repo.CreateUser(ctx, CreateUserInput{
 		FullName:     "Rollback Test User",

@@ -264,8 +264,9 @@ func mapUserDatabaseError(err error) error {
 
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		switch pgErr.ConstraintName {
-		case "users_email_key":
+		case "users_email_key", "users_email_lower_unique":
 			return ErrEmailAlreadyExists
+
 		case "users_phone_number_key":
 			return ErrPhoneAlreadyExists
 		}
