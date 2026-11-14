@@ -12,6 +12,7 @@ import (
 	"github.com/Terna27/Aidora/apps/backend/internal/api"
 	"github.com/Terna27/Aidora/apps/backend/internal/auth"
 	"github.com/Terna27/Aidora/apps/backend/internal/emergency"
+	"github.com/Terna27/Aidora/apps/backend/internal/location"
 )
 
 const (
@@ -33,6 +34,31 @@ var (
 	_ auth.Authenticator         = (*fakeAuthenticator)(nil)
 	_ emergency.EmergencyCreator = (*fakeCreator)(nil)
 )
+
+type fakeLocationService struct{}
+
+func (f *fakeLocationService) SavePatientLocation(
+	ctx context.Context,
+	emergencyID, patientID string,
+	update location.LocationUpdate,
+) (location.Location, error) {
+	return location.Location{}, nil
+}
+
+func (f *fakeLocationService) SaveResponderLocation(
+	ctx context.Context,
+	emergencyID, responderID string,
+	update location.LocationUpdate,
+) (location.Location, error) {
+	return location.Location{}, nil
+}
+
+func (f *fakeLocationService) GetSnapshot(
+	ctx context.Context,
+	emergencyID, requesterID string,
+) (location.LocationSnapshot, error) {
+	return location.LocationSnapshot{}, nil
+}
 
 func (f *fakeAuthenticator) Authenticate(ctx context.Context, accessToken string) (auth.Principal, error) {
 	f.callCount++
@@ -120,6 +146,24 @@ func (f *fakeAuthService) VerifyPhone(
 	return nil
 }
 
+func (f *fakeAuthService) RequestPasswordReset(
+	ctx context.Context,
+	identifier string,
+	channel string,
+) error {
+	return nil
+}
+
+func (f *fakeAuthService) ResetPassword(
+	ctx context.Context,
+	identifier string,
+	channel string,
+	code string,
+	newPassword string,
+) error {
+	return nil
+}
+
 func (f *fakeCreator) Create(
 	ctx context.Context,
 	patientID string,
@@ -141,11 +185,13 @@ func newTestRouter(
 	t.Helper()
 
 	authHandler := auth.NewHandler(&fakeAuthService{})
+	locationHandler := location.NewHandler(&fakeLocationService{})
 
 	router, err := NewRouter(
 		authenticator,
 		authHandler,
 		emergency.NewHandler(creator),
+		locationHandler,
 	)
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
@@ -357,6 +403,7 @@ func TestNewRouter_RequiresDependencies(t *testing.T) {
 	authHandler := auth.NewHandler(&fakeAuthService{})
 	emergencyHandler := emergency.NewHandler(&fakeCreator{})
 	authenticator := &fakeAuthenticator{}
+	locationHandler := location.NewHandler(&fakeLocationService{})
 
 	tests := []struct {
 		name          string
@@ -390,6 +437,7 @@ func TestNewRouter_RequiresDependencies(t *testing.T) {
 				test.authenticator,
 				test.authHandler,
 				test.emergency,
+				locationHandler,
 			)
 
 			if err == nil {
@@ -419,5 +467,63 @@ func TestRouter_Emergencies_RejectsEmptyAuthenticatedIdentity(t *testing.T) {
 
 	if creator.callCount != 0 {
 		t.Errorf("emergency service called %d times, want 0", creator.callCount)
+	}
+}
+
+func TestRouter_PasswordResetEndpointsArePublic(t *testing.T) {
+	authenticator := &fakeAuthenticator{
+		err: errors.New("authenticator should not be called"),
+	}
+
+	router := newTestRouter(t, authenticator, &fakeCreator{})
+
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "request password reset",
+			path:       "/api/v1/auth/password/forgot",
+			body:       `{"identifier":"patient@example.com","channel":"email"}`,
+			wantStatus: http.StatusAccepted,
+		},
+		{
+			name:       "confirm password reset",
+			path:       "/api/v1/auth/password/reset",
+			body:       `{"identifier":"patient@example.com","channel":"email","code":"123456","newPassword":"new-password"}`,
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodPost,
+				test.path,
+				strings.NewReader(test.body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != test.wantStatus {
+				t.Fatalf(
+					"status = %d, want %d; body = %s",
+					rec.Code,
+					test.wantStatus,
+					rec.Body.String(),
+				)
+			}
+
+			if authenticator.callCount != 0 {
+				t.Errorf(
+					"Authenticate called %d times, want 0",
+					authenticator.callCount,
+				)
+			}
+		})
 	}
 }
