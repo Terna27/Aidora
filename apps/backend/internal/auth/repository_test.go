@@ -38,17 +38,10 @@ func TestRepositoryCreateUserValidation(t *testing.T) {
 			}(),
 		},
 		{
-			name: "empty email",
+			name: "missing both email and phone",
 			input: func() CreateUserInput {
 				input := validInput
 				input.Email = ""
-				return input
-			}(),
-		},
-		{
-			name: "empty phone number",
-			input: func() CreateUserInput {
-				input := validInput
 				input.PhoneNumber = ""
 				return input
 			}(),
@@ -58,6 +51,14 @@ func TestRepositoryCreateUserValidation(t *testing.T) {
 			input: func() CreateUserInput {
 				input := validInput
 				input.PasswordHash = ""
+				return input
+			}(),
+		},
+		{
+			name: "whitespace password hash",
+			input: func() CreateUserInput {
+				input := validInput
+				input.PasswordHash = "   "
 				return input
 			}(),
 		},
