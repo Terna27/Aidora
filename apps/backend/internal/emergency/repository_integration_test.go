@@ -938,3 +938,570 @@ func TestPostgresCreateEmergencyRollsBackOnHistoryFailure(t *testing.T) {
 	// Every write in the failed transaction must have been rolled back.
 	assertPatientCreationCounts(t, pool, patientID, 0, 0, 0)
 }
+
+// createTestEmergency creates a real emergency through the service so
+// cancellation tests exercise the repository against normal persisted data.
+func createTestEmergency(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	patientID string,
+) string {
+	t.Helper()
+
+	service := NewService(NewRepository(pool))
+
+	request := CreateRequest{
+		Source:           LocationSourceManual,
+		VillageCommunity: stringPointer("Makurdi"),
+		Landmark:         stringPointer("Cancellation integration test"),
+	}
+
+	result, err := service.Create(
+		context.Background(),
+		patientID,
+		fmt.Sprintf("cancel-test-%d", time.Now().UnixNano()),
+		request,
+	)
+	if err != nil {
+		t.Fatalf("create emergency fixture: %v", err)
+	}
+
+	var response struct {
+		ID string `json:"id"`
+	}
+
+	if err := json.Unmarshal(result.Data, &response); err != nil {
+		t.Fatalf("decode emergency fixture response: %v", err)
+	}
+
+	if response.ID == "" {
+		t.Fatal("created emergency has an empty ID")
+	}
+
+	return response.ID
+}
+
+func assertCancellationHistory(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	emergencyID string,
+	expectedCount int,
+) {
+	t.Helper()
+
+	var count int
+
+	err := pool.QueryRow(context.Background(), `
+		SELECT COUNT(*)
+		FROM emergency_state_history
+		WHERE emergency_id = $1
+		  AND new_state = 'CANCELLED'
+	`, emergencyID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count cancellation history: %v", err)
+	}
+
+	if count != expectedCount {
+		t.Errorf(
+			"expected %d cancellation history entries, got %d",
+			expectedCount,
+			count,
+		)
+	}
+}
+
+func TestPostgresCancelEmergency(t *testing.T) {
+	pool := newIntegrationPool(t)
+	patientID := createTestPatient(t, pool)
+	emergencyID := createTestEmergency(t, pool, patientID)
+
+	service := NewService(NewRepository(pool))
+	reason := "Patient requested cancellation"
+
+	result, err := service.Cancel(
+		context.Background(),
+		emergencyID,
+		patientID,
+		stringPointer(reason),
+	)
+	if err != nil {
+		t.Fatalf("cancel emergency: %v", err)
+	}
+
+	if result.ID != emergencyID {
+		t.Errorf("expected emergency ID %q, got %q", emergencyID, result.ID)
+	}
+
+	if result.State != StateCancelled {
+		t.Errorf("expected state %q, got %q", StateCancelled, result.State)
+	}
+
+	if result.CancelledAt.IsZero() {
+		t.Error("expected cancellation timestamp in result")
+	}
+
+	var (
+		state              string
+		cancelledAt        time.Time
+		cancelledBy        string
+		cancellationReason string
+	)
+
+	err = pool.QueryRow(context.Background(), `
+		SELECT
+			current_state,
+			cancelled_at,
+			cancelled_by::text,
+			cancellation_reason
+		FROM emergencies
+		WHERE id = $1
+	`, emergencyID).Scan(
+		&state,
+		&cancelledAt,
+		&cancelledBy,
+		&cancellationReason,
+	)
+	if err != nil {
+		t.Fatalf("read cancelled emergency: %v", err)
+	}
+
+	if state != string(StateCancelled) {
+		t.Errorf("expected stored state CANCELLED, got %q", state)
+	}
+
+	if cancelledAt.IsZero() {
+		t.Error("expected cancelled_at to be persisted")
+	}
+
+	if cancelledBy != patientID {
+		t.Errorf("expected cancelled_by %q, got %q", patientID, cancelledBy)
+	}
+
+	if cancellationReason != reason {
+		t.Errorf(
+			"expected cancellation reason %q, got %q",
+			reason,
+			cancellationReason,
+		)
+	}
+
+	var (
+		previousState string
+		newState      string
+		actorType     string
+		actorUserID   string
+		historyReason string
+	)
+
+	err = pool.QueryRow(context.Background(), `
+		SELECT
+			previous_state,
+			new_state,
+			actor_type,
+			actor_user_id::text,
+			reason
+		FROM emergency_state_history
+		WHERE emergency_id = $1
+		  AND new_state = 'CANCELLED'
+	`, emergencyID).Scan(
+		&previousState,
+		&newState,
+		&actorType,
+		&actorUserID,
+		&historyReason,
+	)
+	if err != nil {
+		t.Fatalf("read cancellation history: %v", err)
+	}
+
+	if previousState != string(StateDispatching) {
+		t.Errorf("expected previous state DISPATCHING, got %q", previousState)
+	}
+
+	if newState != string(StateCancelled) {
+		t.Errorf("expected history state CANCELLED, got %q", newState)
+	}
+
+	if actorType != "PATIENT" {
+		t.Errorf("expected actor type PATIENT, got %q", actorType)
+	}
+
+	if actorUserID != patientID {
+		t.Errorf("expected history actor %q, got %q", patientID, actorUserID)
+	}
+
+	if historyReason != reason {
+		t.Errorf("expected history reason %q, got %q", reason, historyReason)
+	}
+
+	assertCancellationHistory(t, pool, emergencyID, 1)
+}
+
+func TestPostgresCancelEmergencyRejectsAnotherPatient(t *testing.T) {
+	pool := newIntegrationPool(t)
+
+	ownerID := createTestPatient(t, pool)
+	otherPatientID := createTestPatient(t, pool)
+	emergencyID := createTestEmergency(t, pool, ownerID)
+
+	service := NewService(NewRepository(pool))
+
+	_, err := service.Cancel(
+		context.Background(),
+		emergencyID,
+		otherPatientID,
+		nil,
+	)
+
+	if !errors.Is(err, ErrCancellationAccessDenied) {
+		t.Fatalf(
+			"expected ErrCancellationAccessDenied, got %v",
+			err,
+		)
+	}
+
+	var state string
+
+	err = pool.QueryRow(context.Background(), `
+		SELECT current_state
+		FROM emergencies
+		WHERE id = $1
+	`, emergencyID).Scan(&state)
+	if err != nil {
+		t.Fatalf("read emergency after rejected cancellation: %v", err)
+	}
+
+	if state != string(StateDispatching) {
+		t.Errorf(
+			"emergency state changed after unauthorized cancellation: %q",
+			state,
+		)
+	}
+
+	assertCancellationHistory(t, pool, emergencyID, 0)
+}
+
+func TestPostgresCancelEmergencyStateRules(t *testing.T) {
+	pool := newIntegrationPool(t)
+	service := NewService(NewRepository(pool))
+
+	allowedStates := []string{
+		"CREATED",
+		"DISPATCHING",
+		"EXPIRED",
+		"ESCALATED",
+		"ACCEPTED",
+		"PICKUP_ARRIVED",
+		"REASSIGNING",
+		"FAILED_CONTACT",
+	}
+
+	prohibitedStates := []string{
+		"PATIENT_ONBOARD",
+		"HOSPITAL_SELECTED",
+		"IN_TRANSIT",
+		"ARRIVED",
+		"COMPLETED",
+		"CANCELLED",
+	}
+
+	for _, state := range allowedStates {
+		t.Run("allowed_"+state, func(t *testing.T) {
+			patientID := createTestPatient(t, pool)
+			emergencyID := createTestEmergency(t, pool, patientID)
+
+			_, err := pool.Exec(context.Background(), `
+				UPDATE emergencies
+				SET current_state = $2
+				WHERE id = $1
+			`, emergencyID, state)
+			if err != nil {
+				t.Fatalf("set fixture state to %s: %v", state, err)
+			}
+
+			result, err := service.Cancel(
+				context.Background(),
+				emergencyID,
+				patientID,
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("expected cancellation from %s to succeed: %v", state, err)
+			}
+
+			if result.State != StateCancelled {
+				t.Errorf(
+					"expected result state CANCELLED, got %q",
+					result.State,
+				)
+			}
+
+			var storedState string
+
+			err = pool.QueryRow(context.Background(), `
+				SELECT current_state
+				FROM emergencies
+				WHERE id = $1
+			`, emergencyID).Scan(&storedState)
+			if err != nil {
+				t.Fatalf("read resulting emergency state: %v", err)
+			}
+
+			if storedState != string(StateCancelled) {
+				t.Errorf("expected stored state CANCELLED, got %q", storedState)
+			}
+
+			assertCancellationHistory(t, pool, emergencyID, 1)
+		})
+	}
+
+	for _, state := range prohibitedStates {
+		t.Run("prohibited_"+state, func(t *testing.T) {
+			patientID := createTestPatient(t, pool)
+			emergencyID := createTestEmergency(t, pool, patientID)
+
+			_, err := pool.Exec(context.Background(), `
+				UPDATE emergencies
+				SET current_state = $2
+				WHERE id = $1
+			`, emergencyID, state)
+			if err != nil {
+				t.Fatalf("set fixture state to %s: %v", state, err)
+			}
+
+			_, err = service.Cancel(
+				context.Background(),
+				emergencyID,
+				patientID,
+				nil,
+			)
+
+			if !errors.Is(err, ErrInvalidTransition) {
+				t.Fatalf(
+					"expected ErrInvalidTransition from %s, got %v",
+					state,
+					err,
+				)
+			}
+
+			var storedState string
+
+			err = pool.QueryRow(context.Background(), `
+				SELECT current_state
+				FROM emergencies
+				WHERE id = $1
+			`, emergencyID).Scan(&storedState)
+			if err != nil {
+				t.Fatalf("read emergency state after rejected cancellation: %v", err)
+			}
+
+			if storedState != state {
+				t.Errorf(
+					"expected state to remain %q, got %q",
+					state,
+					storedState,
+				)
+			}
+
+			assertCancellationHistory(t, pool, emergencyID, 0)
+		})
+	}
+}
+
+func TestPostgresCancelEmergencyRepeatedRequest(t *testing.T) {
+	pool := newIntegrationPool(t)
+	patientID := createTestPatient(t, pool)
+	emergencyID := createTestEmergency(t, pool, patientID)
+
+	service := NewService(NewRepository(pool))
+
+	_, err := service.Cancel(
+		context.Background(),
+		emergencyID,
+		patientID,
+		stringPointer("First cancellation"),
+	)
+	if err != nil {
+		t.Fatalf("first cancellation: %v", err)
+	}
+
+	_, err = service.Cancel(
+		context.Background(),
+		emergencyID,
+		patientID,
+		stringPointer("Repeated cancellation"),
+	)
+
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition on repeated cancellation, got %v", err)
+	}
+
+	assertCancellationHistory(t, pool, emergencyID, 1)
+}
+
+func TestPostgresConcurrentEmergencyCancellation(t *testing.T) {
+	pool := newIntegrationPool(t)
+	patientID := createTestPatient(t, pool)
+	emergencyID := createTestEmergency(t, pool, patientID)
+
+	service := NewService(NewRepository(pool))
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+
+			_, err := service.Cancel(
+				context.Background(),
+				emergencyID,
+				patientID,
+				stringPointer("Concurrent cancellation"),
+			)
+
+			results <- err
+		}()
+	}
+
+	close(start)
+
+	var successes, invalidTransitions int
+
+	for i := 0; i < 2; i++ {
+		err := <-results
+
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrInvalidTransition):
+			invalidTransitions++
+		default:
+			t.Fatalf("unexpected concurrent cancellation error: %v", err)
+		}
+	}
+
+	if successes != 1 {
+		t.Errorf("expected exactly one successful cancellation, got %d", successes)
+	}
+
+	if invalidTransitions != 1 {
+		t.Errorf(
+			"expected exactly one rejected repeated cancellation, got %d",
+			invalidTransitions,
+		)
+	}
+
+	var state string
+
+	err := pool.QueryRow(context.Background(), `
+		SELECT current_state
+		FROM emergencies
+		WHERE id = $1
+	`, emergencyID).Scan(&state)
+	if err != nil {
+		t.Fatalf("read emergency after concurrent cancellation: %v", err)
+	}
+
+	if state != string(StateCancelled) {
+		t.Errorf("expected final state CANCELLED, got %q", state)
+	}
+
+	assertCancellationHistory(t, pool, emergencyID, 1)
+}
+
+func TestPostgresCancelEmergencyRollsBackOnHistoryFailure(t *testing.T) {
+	pool := newIntegrationPool(t)
+	patientID := createTestPatient(t, pool)
+	emergencyID := createTestEmergency(t, pool, patientID)
+
+	service := NewService(NewRepository(pool))
+
+	_, err := pool.Exec(context.Background(), `
+		CREATE OR REPLACE FUNCTION public.test_fail_cancel_history()
+		RETURNS trigger
+		LANGUAGE plpgsql
+		AS $$
+		BEGIN
+			IF NEW.new_state = 'CANCELLED' THEN
+				RAISE EXCEPTION 'simulated cancellation history failure';
+			END IF;
+
+			RETURN NEW;
+		END;
+		$$;
+
+		CREATE TRIGGER test_fail_cancel_history_trigger
+		BEFORE INSERT ON emergency_state_history
+		FOR EACH ROW
+		EXECUTE FUNCTION public.test_fail_cancel_history();
+	`)
+	if err != nil {
+		t.Fatalf("install cancellation history failure trigger: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, cleanupErr := pool.Exec(context.Background(), `
+			DROP TRIGGER IF EXISTS test_fail_cancel_history_trigger
+			ON emergency_state_history;
+
+			DROP FUNCTION IF EXISTS public.test_fail_cancel_history();
+		`)
+		if cleanupErr != nil {
+			t.Errorf("remove cancellation history failure trigger: %v", cleanupErr)
+		}
+	})
+
+	_, err = service.Cancel(
+		context.Background(),
+		emergencyID,
+		patientID,
+		stringPointer("Rollback test"),
+	)
+	if err == nil {
+		t.Fatal("expected cancellation to fail when history insertion is rejected")
+	}
+
+	var (
+		state                    string
+		cancelledAtIsNull        bool
+		cancelledByIsNull        bool
+		cancellationReasonIsNull bool
+	)
+
+	err = pool.QueryRow(context.Background(), `
+		SELECT
+			current_state,
+			cancelled_at IS NULL,
+			cancelled_by IS NULL,
+			cancellation_reason IS NULL
+		FROM emergencies
+		WHERE id = $1
+	`, emergencyID).Scan(
+		&state,
+		&cancelledAtIsNull,
+		&cancelledByIsNull,
+		&cancellationReasonIsNull,
+	)
+	if err != nil {
+		t.Fatalf("read emergency after failed cancellation: %v", err)
+	}
+
+	if state != string(StateDispatching) {
+		t.Errorf("expected state to roll back to DISPATCHING, got %q", state)
+	}
+
+	if !cancelledAtIsNull {
+		t.Error("expected cancelled_at update to roll back")
+	}
+
+	if !cancelledByIsNull {
+		t.Error("expected cancelled_by update to roll back")
+	}
+
+	if !cancellationReasonIsNull {
+		t.Error("expected cancellation_reason update to roll back")
+	}
+
+	assertCancellationHistory(t, pool, emergencyID, 0)
+}

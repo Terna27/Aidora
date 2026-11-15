@@ -139,14 +139,17 @@ func (s *Service) RequestPasswordReset(
 		return fmt.Errorf("hash password reset code: %w", err)
 	}
 
-	err = s.repository.CreateChallenge(ctx, CreateChallengeInput{
-		UserID:      user.ID,
-		Purpose:     verificationPurposePasswordReset,
-		Channel:     channel,
-		Destination: identifier,
-		CodeHash:    codeHash,
-		ExpiresAt:   time.Now().Add(verificationCodeTTL),
-	})
+	challengeID, err := s.repository.CreateChallenge(
+		ctx,
+		CreateChallengeInput{
+			UserID:      user.ID,
+			Purpose:     verificationPurposePasswordReset,
+			Channel:     channel,
+			Destination: identifier,
+			CodeHash:    codeHash,
+			ExpiresAt:   time.Now().Add(verificationCodeTTL),
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("create password reset challenge: %w", err)
 	}
@@ -158,19 +161,10 @@ func (s *Service) RequestPasswordReset(
 		verificationPurposePasswordReset,
 		code,
 	); err != nil {
-		_, invalidateErr := s.repository.pool.Exec(
+		if invalidateErr := s.repository.ConsumeChallenge(
 			ctx,
-			`
-            UPDATE auth_verification_challenges
-            SET consumed_at = NOW()
-            WHERE user_id = $1
-              AND purpose = $2
-              AND consumed_at IS NULL
-            `,
-			user.ID,
-			verificationPurposePasswordReset,
-		)
-		if invalidateErr != nil {
+			challengeID,
+		); invalidateErr != nil {
 			return fmt.Errorf(
 				"send password reset code: %w (also failed to invalidate challenge: %v)",
 				err,
@@ -255,6 +249,7 @@ func (s *Service) ResetPassword(
 	return nil
 }
 
+// requestVerification creates and sends an identity-verification code.
 func (s *Service) requestVerification(
 	ctx context.Context,
 	identifier string,
@@ -293,14 +288,17 @@ func (s *Service) requestVerification(
 
 	destination := identifier
 
-	err = s.repository.CreateChallenge(ctx, CreateChallengeInput{
-		UserID:      user.ID,
-		Purpose:     purpose,
-		Channel:     channel,
-		Destination: destination,
-		CodeHash:    codeHash,
-		ExpiresAt:   time.Now().Add(verificationCodeTTL),
-	})
+	challengeID, err := s.repository.CreateChallenge(
+		ctx,
+		CreateChallengeInput{
+			UserID:      user.ID,
+			Purpose:     purpose,
+			Channel:     channel,
+			Destination: destination,
+			CodeHash:    codeHash,
+			ExpiresAt:   time.Now().Add(verificationCodeTTL),
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("create verification challenge: %w", err)
 	}
@@ -312,20 +310,10 @@ func (s *Service) requestVerification(
 		purpose,
 		code,
 	); err != nil {
-		// Do not leave a usable code behind when delivery fails.
-		_, invalidateErr := s.repository.pool.Exec(
+		if invalidateErr := s.repository.ConsumeChallenge(
 			ctx,
-			`
-			UPDATE auth_verification_challenges
-			SET consumed_at = NOW()
-			WHERE user_id = $1
-			  AND purpose = $2
-			  AND consumed_at IS NULL
-			`,
-			user.ID,
-			purpose,
-		)
-		if invalidateErr != nil {
+			challengeID,
+		); invalidateErr != nil {
 			return fmt.Errorf(
 				"send verification code: %w (also failed to invalidate challenge: %v)",
 				err,

@@ -79,14 +79,14 @@ func HashVerificationCode(
 func (r *Repository) CreateChallenge(
 	ctx context.Context,
 	input CreateChallengeInput,
-) error {
+) (string, error) {
 	if err := validateChallengeInput(input); err != nil {
-		return err
+		return "", err
 	}
 
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"begin challenge creation transaction: %w",
 			err,
 		)
@@ -115,11 +115,11 @@ func (r *Repository) CreateChallenge(
 	)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrUserNotFound
+		return "", ErrUserNotFound
 	}
 
 	if err != nil {
-		return fmt.Errorf("lock challenge user: %w", err)
+		return "", fmt.Errorf("lock challenge user: %w", err)
 	}
 
 	// A user must only be able to verify an identity that belongs
@@ -130,7 +130,7 @@ func (r *Repository) CreateChallenge(
 		email,
 		phoneNumber,
 	) {
-		return ErrInvalidChallengeInput
+		return "", ErrInvalidChallengeInput
 	}
 
 	// Invalidate previous active challenges for this user and purpose.
@@ -148,47 +148,50 @@ func (r *Repository) CreateChallenge(
 	)
 
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"invalidate previous challenges: %w",
 			err,
 		)
 	}
 
-	// Insert the new challenge.
-	_, err = tx.Exec(
+	// Insert the new challenge and return its database-generated ID.
+	var challengeID string
+
+	err = tx.QueryRow(
 		ctx,
 		`INSERT INTO auth_verification_challenges (
-			user_id,
-			purpose,
-			channel,
-			destination,
-			code_hash,
-			expires_at
-		)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+        user_id,
+        purpose,
+        channel,
+        destination,
+        code_hash,
+        expires_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING id`,
 		input.UserID,
 		input.Purpose,
 		input.Channel,
 		input.Destination,
 		input.CodeHash,
 		input.ExpiresAt,
-	)
+	).Scan(&challengeID)
 
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"insert verification challenge: %w",
 			err,
 		)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"commit challenge creation: %w",
 			err,
 		)
 	}
 
-	return nil
+	return challengeID, nil
 }
 
 // VerifyChallenge verifies a candidate code hash against the latest
@@ -821,4 +824,29 @@ func challengeDestinationMatches(
 	default:
 		return false
 	}
+}
+
+// ConsumeChallenge invalidates only the specified challenge.
+// It does not affect newer challenges belonging to the same user.
+func (r *Repository) ConsumeChallenge(
+    ctx context.Context,
+    challengeID string,
+) error {
+    if strings.TrimSpace(challengeID) == "" {
+        return ErrInvalidChallengeInput
+    }
+
+    _, err := r.pool.Exec(
+        ctx,
+        `UPDATE auth_verification_challenges
+         SET consumed_at = NOW()
+         WHERE id = $1
+           AND consumed_at IS NULL`,
+        challengeID,
+    )
+    if err != nil {
+        return fmt.Errorf("consume verification challenge: %w", err)
+    }
+
+    return nil
 }
