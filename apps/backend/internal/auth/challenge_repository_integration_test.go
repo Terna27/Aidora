@@ -38,7 +38,7 @@ func createTestChallenge(
 		t.Fatalf("hash challenge code: %v", err)
 	}
 
-	err = repo.CreateChallenge(
+	_, err = repo.CreateChallenge(
 		context.Background(),
 		CreateChallengeInput{
 			UserID:      user.ID,
@@ -67,7 +67,7 @@ func createPasswordResetTestChallenge(
 
 	hash := candidateChallengeHash(t, code)
 
-	err := repo.CreateChallenge(context.Background(), CreateChallengeInput{
+	_, err := repo.CreateChallenge(context.Background(), CreateChallengeInput{
 		UserID:      user.ID,
 		Purpose:     "password_reset",
 		Channel:     "email",

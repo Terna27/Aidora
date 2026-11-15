@@ -13,6 +13,7 @@ import (
 	"github.com/Terna27/Aidora/apps/backend/internal/auth"
 	"github.com/Terna27/Aidora/apps/backend/internal/emergency"
 	"github.com/Terna27/Aidora/apps/backend/internal/location"
+	"github.com/Terna27/Aidora/apps/backend/internal/responder"
 )
 
 const (
@@ -28,6 +29,21 @@ type fakeAuthenticator struct {
 
 	callCount     int
 	receivedToken string
+}
+
+type fakeResponderApplicationService struct{}
+
+func (f *fakeResponderApplicationService) Apply(
+	ctx context.Context,
+	userID string,
+	request responder.ApplicationRequest,
+) (responder.ApplicationResult, error) {
+	return responder.ApplicationResult{
+		UserID:       userID,
+		TypeCodes:    request.ResponderTypes,
+		Verification: "pending",
+		Availability: "offline",
+	}, nil
 }
 
 var (
@@ -209,12 +225,14 @@ func newTestRouter(
 
 	authHandler := auth.NewHandler(&fakeAuthService{})
 	locationHandler := location.NewHandler(&fakeLocationService{})
+	responderHandler := responder.NewHandler(&fakeResponderApplicationService{})
 
 	router, err := NewRouter(
 		authenticator,
 		authHandler,
 		emergency.NewHandler(creator),
 		locationHandler,
+		responderHandler,
 	)
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
@@ -446,6 +464,7 @@ func TestNewRouter_RequiresDependencies(t *testing.T) {
 	emergencyHandler := emergency.NewHandler(&fakeCreator{})
 	authenticator := &fakeAuthenticator{}
 	locationHandler := location.NewHandler(&fakeLocationService{})
+	responderHandler := responder.NewHandler(&fakeResponderApplicationService{})
 
 	tests := []struct {
 		name          string
@@ -480,6 +499,7 @@ func TestNewRouter_RequiresDependencies(t *testing.T) {
 				test.authHandler,
 				test.emergency,
 				locationHandler,
+				responderHandler,
 			)
 
 			if err == nil {

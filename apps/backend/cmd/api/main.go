@@ -17,6 +17,8 @@ import (
 	"github.com/Terna27/Aidora/apps/backend/internal/emergency"
 	"github.com/Terna27/Aidora/apps/backend/internal/httpapi"
 	"github.com/Terna27/Aidora/apps/backend/internal/location"
+	"github.com/Terna27/Aidora/apps/backend/internal/notification"
+	"github.com/Terna27/Aidora/apps/backend/internal/responder"
 )
 
 func main() {
@@ -36,6 +38,11 @@ func run() error {
 	challengeConfig, err := config.LoadAuthChallengeConfig()
 	if err != nil {
 		return fmt.Errorf("load authentication challenge configuration: %w", err)
+	}
+
+	deliveryConfig, err := config.LoadAuthDeliveryConfig()
+	if err != nil {
+		return fmt.Errorf("load authentication delivery configuration: %w", err)
 	}
 
 	// 2. Create the JWT access-token verifier.
@@ -80,9 +87,11 @@ func run() error {
 
 	// Configure verification security.
 	// A delivery provider must be connected before verification requests can succeed.
+	verificationSender := notification.NewSender(deliveryConfig)
+
 	if err := authService.ConfigureVerification(
 		challengeConfig.Pepper,
-		nil,
+		verificationSender,
 	); err != nil {
 		return fmt.Errorf("configure authentication verification: %w", err)
 	}
@@ -98,6 +107,9 @@ func run() error {
 	locationRepository := location.NewRepository(pool)
 	locationService := location.NewService(locationRepository)
 	locationHandler := location.NewHandler(locationService)
+	responderRepository := responder.NewRepository(pool)
+	responderService := responder.NewService(responderRepository)
+	responderHandler := responder.NewHandler(responderService)
 
 	// 6. Construct the application router.
 	router, err := httpapi.NewRouter(
@@ -105,6 +117,7 @@ func run() error {
 		authHandler,
 		emergencyHandler,
 		locationHandler,
+		responderHandler,
 	)
 	if err != nil {
 		return fmt.Errorf("create HTTP router: %w", err)
