@@ -13,9 +13,12 @@ import (
 )
 
 var (
-	ErrPatientRoleRequired = errors.New("patient role required")
-	ErrActiveEmergency     = errors.New("patient already has an active emergency")
-	ErrIdempotencyConflict = errors.New("idempotency key was used with a different payload")
+    ErrPatientRoleRequired     = errors.New("patient role required")
+    ErrActiveEmergency         = errors.New("patient already has an active emergency")
+    ErrIdempotencyConflict     = errors.New("idempotency key was used with a different payload")
+    ErrEmergencyNotFound       = errors.New("emergency not found")
+    ErrCancellationAccessDenied = errors.New("patient does not own this emergency")
+    ErrInvalidTransition       = errors.New("emergency cannot transition to the requested state")
 )
 
 type Repository struct {
@@ -30,6 +33,12 @@ type CreateResult struct {
 	Data     json.RawMessage
 	Status   int
 	Replayed bool
+}
+
+type CancelResult struct {
+    ID          string    `json:"id"`
+    State       State     `json:"state"`
+    CancelledAt time.Time `json:"cancelledAt"`
 }
 
 type createResponseData struct {
@@ -310,4 +319,93 @@ func handleCreateError(err error) error {
 	}
 
 	return fmt.Errorf("insert emergency: %w", err)
+}
+
+func (repo *Repository) Cancel(
+    ctx context.Context,
+    emergencyID string,
+    patientID string,
+    reason *string,
+) (CancelResult, error) {
+    tx, err := repo.pool.BeginTx(ctx, pgx.TxOptions{})
+    if err != nil {
+        return CancelResult{}, fmt.Errorf("begin cancellation transaction: %w", err)
+    }
+    defer func() {
+        _ = tx.Rollback(ctx)
+    }()
+
+    // Lock the emergency so concurrent cancellation or lifecycle updates
+    // cannot act on the same previous state.
+    var (
+        ownerID      string
+        currentState string
+    )
+
+    err = tx.QueryRow(ctx, `
+        SELECT patient_id, current_state
+        FROM emergencies
+        WHERE id = $1
+        FOR UPDATE
+    `, emergencyID).Scan(&ownerID, &currentState)
+
+    if errors.Is(err, pgx.ErrNoRows) {
+        return CancelResult{}, ErrEmergencyNotFound
+    }
+    if err != nil {
+        return CancelResult{}, fmt.Errorf("load emergency for cancellation: %w", err)
+    }
+
+    if ownerID != patientID {
+        return CancelResult{}, ErrCancellationAccessDenied
+    }
+
+    previousState := State(currentState)
+
+    if !CanActorTransition(ActorPatient, previousState, StateCancelled) {
+        return CancelResult{}, ErrInvalidTransition
+    }
+
+    var cancelledAt time.Time
+
+    err = tx.QueryRow(ctx, `
+        UPDATE emergencies
+        SET current_state = 'CANCELLED',
+            cancelled_at = clock_timestamp(),
+            cancelled_by = $2,
+            cancellation_reason = $3,
+            updated_at = clock_timestamp()
+        WHERE id = $1
+        RETURNING cancelled_at
+    `, emergencyID, patientID, reason).Scan(&cancelledAt)
+
+    if err != nil {
+        return CancelResult{}, fmt.Errorf("update cancelled emergency: %w", err)
+    }
+
+    _, err = tx.Exec(ctx, `
+        INSERT INTO emergency_state_history (
+            emergency_id,
+            previous_state,
+            new_state,
+            actor_type,
+            actor_user_id,
+            reason
+        )
+        VALUES ($1, $2, 'CANCELLED', 'PATIENT', $3, $4)
+    `, emergencyID, previousState, patientID, reason)
+
+    if err != nil {
+        return CancelResult{}, fmt.Errorf("record cancellation history: %w", err)
+    }
+
+    if err := tx.Commit(ctx); err != nil {
+        return CancelResult{}, fmt.Errorf("commit emergency cancellation: %w", err)
+    }
+
+    return CancelResult{
+        ID:          emergencyID,
+        State:       StateCancelled,
+        CancelledAt: cancelledAt,
+    }, nil
 }

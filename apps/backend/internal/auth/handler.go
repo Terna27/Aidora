@@ -26,6 +26,8 @@ type AuthService interface {
 	VerifyEmail(ctx context.Context, email string, code string) error
 	RequestPhoneVerification(ctx context.Context, phone string) error
 	VerifyPhone(ctx context.Context, phone string, code string) error
+	RequestPasswordReset(ctx context.Context, identifier string, channel string) error
+	ResetPassword(ctx context.Context, identifier string, channel string, code string, newPassword string) error
 }
 
 // Handler handles authentication HTTP requests.
@@ -73,6 +75,18 @@ type phoneVerificationRequest struct {
 type phoneVerificationConfirmRequest struct {
 	PhoneNumber string `json:"phoneNumber"`
 	Code        string `json:"code"`
+}
+
+type passwordResetRequest struct {
+	Identifier string `json:"identifier"`
+	Channel    string `json:"channel"`
+}
+
+type passwordResetConfirmRequest struct {
+	Identifier  string `json:"identifier"`
+	Channel     string `json:"channel"`
+	Code        string `json:"code"`
+	NewPassword string `json:"newPassword"`
 }
 
 // Register handles POST /api/v1/auth/register.
@@ -452,6 +466,109 @@ func (h *Handler) VerifyPhone(w http.ResponseWriter, r *http.Request) {
 		"verified": true,
 	}); err != nil {
 		log.Printf("failed to write phone verification response: %v", err)
+	}
+}
+
+// RequestPasswordReset handles POST /api/v1/auth/password/forgot.
+func (h *Handler) RequestPasswordReset(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	var request passwordResetRequest
+
+	if !decodeAuthRequest(w, r, &request) {
+		return
+	}
+
+	request.Identifier = strings.TrimSpace(request.Identifier)
+	request.Channel = strings.ToLower(strings.TrimSpace(request.Channel))
+
+	if request.Identifier == "" ||
+		!validChallengeChannel("password_reset", request.Channel) {
+		writeAuthError(
+			w,
+			http.StatusBadRequest,
+			"INVALID_PASSWORD_RESET_REQUEST",
+			"A valid identifier and delivery channel are required.",
+		)
+		return
+	}
+
+	if err := h.service.RequestPasswordReset(
+		r.Context(),
+		request.Identifier,
+		request.Channel,
+	); err != nil {
+		if errors.Is(err, ErrInvalidChallengeInput) {
+			writeAuthError(
+				w,
+				http.StatusBadRequest,
+				"INVALID_PASSWORD_RESET_REQUEST",
+				"Password reset request is invalid.",
+			)
+			return
+		}
+
+		log.Printf("password reset request failed: %v", err)
+		writeAuthError(
+			w,
+			http.StatusInternalServerError,
+			"INTERNAL_ERROR",
+			"An unexpected error occurred.",
+		)
+		return
+	}
+
+	if err := api.WriteSuccess(w, http.StatusAccepted, map[string]string{
+		"message": "If the account is eligible, a password reset code will be sent.",
+	}); err != nil {
+		log.Printf("failed to write password reset request response: %v", err)
+	}
+}
+
+// ResetPassword handles POST /api/v1/auth/password/reset.
+func (h *Handler) ResetPassword(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	var request passwordResetConfirmRequest
+
+	if !decodeAuthRequest(w, r, &request) {
+		return
+	}
+
+	request.Identifier = strings.TrimSpace(request.Identifier)
+	request.Channel = strings.ToLower(strings.TrimSpace(request.Channel))
+
+	if request.Identifier == "" ||
+		!validChallengeChannel("password_reset", request.Channel) ||
+		!isSixDigitCode(request.Code) ||
+		request.NewPassword == "" ||
+		len(request.NewPassword) > maxPasswordLength {
+		writeAuthError(
+			w,
+			http.StatusBadRequest,
+			"INVALID_PASSWORD_RESET_REQUEST",
+			"A valid identifier, channel, six-digit code, and new password are required.",
+		)
+		return
+	}
+
+	if err := h.service.ResetPassword(
+		r.Context(),
+		request.Identifier,
+		request.Channel,
+		request.Code,
+		request.NewPassword,
+	); err != nil {
+		writeChallengeError(w, err, "password reset")
+		return
+	}
+
+	if err := api.WriteSuccess(w, http.StatusOK, map[string]bool{
+		"passwordReset": true,
+	}); err != nil {
+		log.Printf("failed to write password reset confirmation response: %v", err)
 	}
 }
 

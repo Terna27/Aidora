@@ -22,3 +22,7 @@
 # Operating system files
 .DS_Store
 Thumbs.db
+# Compiled Go binaries
+/api
+*.exe
+*.out

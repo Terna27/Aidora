@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/Terna27/Aidora/apps/backend/internal/api"
 	"github.com/Terna27/Aidora/apps/backend/internal/auth"
 )
@@ -23,6 +24,19 @@ type EmergencyCreator interface {
 		idempotencyKey string,
 		request CreateRequest,
 	) (CreateResult, error)
+}
+
+type EmergencyCanceller interface {
+    Cancel(
+        ctx context.Context,
+        emergencyID string,
+        patientID string,
+        reason *string,
+    ) (CancelResult, error)
+}
+
+type CancellationRequest struct {
+    Reason *string `json:"reason,omitempty"`
 }
 
 // Handler handles emergency HTTP requests.
@@ -208,4 +222,144 @@ func writeHandlerError(
 	message string,
 ) {
 	_ = api.WriteError(w, status, code, message, nil)
+}
+
+// Cancel handles POST /api/v1/emergencies/{id}/cancel.
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+    principal, ok := auth.PrincipalFromContext(r.Context())
+    if !ok {
+        writeHandlerError(
+            w,
+            http.StatusUnauthorized,
+            "UNAUTHENTICATED",
+            "Authentication is required.",
+        )
+        return
+    }
+
+    canceller, ok := h.service.(EmergencyCanceller)
+    if !ok {
+        log.Printf("emergency cancellation service is not configured")
+        writeHandlerError(
+            w,
+            http.StatusInternalServerError,
+            "INTERNAL_ERROR",
+            "An unexpected error occurred.",
+        )
+        return
+    }
+
+    // An empty body is allowed. If supplied, it must be a JSON object.
+    r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+    defer r.Body.Close()
+
+    body, err := io.ReadAll(r.Body)
+    if err != nil {
+        var maxBytesErr *http.MaxBytesError
+        if errors.As(err, &maxBytesErr) {
+            writeHandlerError(
+                w,
+                http.StatusRequestEntityTooLarge,
+                "REQUEST_BODY_TOO_LARGE",
+                "Request body exceeds the maximum allowed size.",
+            )
+            return
+        }
+
+        writeHandlerError(
+            w,
+            http.StatusBadRequest,
+            "INVALID_REQUEST_BODY",
+            "Request body could not be read.",
+        )
+        return
+    }
+
+    var request CancellationRequest
+    trimmedBody := strings.TrimSpace(string(body))
+
+    if trimmedBody != "" {
+        if trimmedBody[0] != '{' {
+            writeHandlerError(
+                w,
+                http.StatusBadRequest,
+                "INVALID_REQUEST_BODY",
+                "Request body must be a JSON object.",
+            )
+            return
+        }
+
+        decoder := json.NewDecoder(strings.NewReader(trimmedBody))
+        decoder.DisallowUnknownFields()
+
+        if err := decoder.Decode(&request); err != nil {
+            writeHandlerError(
+                w,
+                http.StatusBadRequest,
+                "INVALID_REQUEST_BODY",
+                "Request body contains invalid or unsupported fields.",
+            )
+            return
+        }
+
+        var extra json.RawMessage
+        if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+            writeHandlerError(
+                w,
+                http.StatusBadRequest,
+                "INVALID_REQUEST_BODY",
+                "Request body must contain exactly one JSON object.",
+            )
+            return
+        }
+    }
+
+    result, err := canceller.Cancel(
+        r.Context(),
+        chi.URLParam(r, "id"),
+        principal.UserID,
+        request.Reason,
+    )
+
+    if err != nil {
+        switch {
+        case errors.Is(err, ErrEmergencyNotFound):
+            writeHandlerError(
+                w,
+                http.StatusNotFound,
+                "EMERGENCY_NOT_FOUND",
+                "The emergency was not found.",
+            )
+
+        case errors.Is(err, ErrCancellationAccessDenied):
+            writeHandlerError(
+                w,
+                http.StatusForbidden,
+                "CANCELLATION_FORBIDDEN",
+                "You are not permitted to cancel this emergency.",
+            )
+
+        case errors.Is(err, ErrInvalidTransition):
+            writeHandlerError(
+                w,
+                http.StatusConflict,
+                "INVALID_EMERGENCY_STATE",
+                "This emergency cannot be cancelled in its current state.",
+            )
+
+        default:
+            log.Printf("failed to cancel emergency: %v", err)
+            writeHandlerError(
+                w,
+                http.StatusInternalServerError,
+                "INTERNAL_ERROR",
+                "An unexpected error occurred.",
+            )
+        }
+        return
+    }
+
+    if err := api.WriteSuccess(w, http.StatusOK, result); err != nil {
+        log.Printf("failed to write emergency cancellation response: %v", err)
+    }
 }

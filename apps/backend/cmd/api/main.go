@@ -11,11 +11,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Terna27/Aidora/apps/backend/internal/api"
+	"github.com/Terna27/Aidora/apps/backend/internal/auth"
+	"github.com/Terna27/Aidora/apps/backend/internal/config"
 	"github.com/Terna27/Aidora/apps/backend/internal/database"
-	"github.com/go-chi/chi/v5"
+	"github.com/Terna27/Aidora/apps/backend/internal/emergency"
+	"github.com/Terna27/Aidora/apps/backend/internal/httpapi"
+	"github.com/Terna27/Aidora/apps/backend/internal/location"
+	"github.com/Terna27/Aidora/apps/backend/internal/notification"
+	"github.com/Terna27/Aidora/apps/backend/internal/responder"
 )
-
 
 func main() {
 	if err := run(); err != nil {
@@ -24,7 +28,34 @@ func main() {
 }
 
 func run() error {
-	// Establish and verify the PostgreSQL connection.
+	// 1. Load and validate application configuration.
+	jwtConfig, err := config.LoadJWTConfig()
+	if err != nil {
+		return fmt.Errorf("load application configuration: %w", err)
+	}
+
+	// Load authentication challenge security configuration.
+	challengeConfig, err := config.LoadAuthChallengeConfig()
+	if err != nil {
+		return fmt.Errorf("load authentication challenge configuration: %w", err)
+	}
+
+	deliveryConfig, err := config.LoadAuthDeliveryConfig()
+	if err != nil {
+		return fmt.Errorf("load authentication delivery configuration: %w", err)
+	}
+
+	// 2. Create the JWT access-token verifier.
+	authenticator, err := auth.NewTokenVerifier(
+		jwtConfig.PublicKey,
+		jwtConfig.Issuer,
+		jwtConfig.Audience,
+	)
+	if err != nil {
+		return fmt.Errorf("create JWT verifier: %w", err)
+	}
+
+	// 3. Establish and verify the PostgreSQL connection.
 	pool, err := database.NewPostgresPool(context.Background())
 	if err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
@@ -33,18 +64,73 @@ func run() error {
 
 	log.Println("PostgreSQL connection established successfully")
 
-	// Initialize the HTTP router.
-	router := chi.NewRouter()
-	router.Get("/health", healthHandler)
+	// 4. Construct the authentication dependency chain.
+	authRepository := auth.NewRepository(pool)
 
-	// Configure the HTTP server.
+	tokenSigner, err := auth.NewTokenSigner(
+		jwtConfig.PrivateKey,
+		jwtConfig.Issuer,
+		jwtConfig.Audience,
+	)
+	if err != nil {
+		return fmt.Errorf("create JWT token signer: %w", err)
+	}
+
+	authService, err := auth.NewService(
+		authRepository,
+		tokenSigner,
+		jwtConfig.RefreshTokenLifetime,
+	)
+	if err != nil {
+		return fmt.Errorf("create authentication service: %w", err)
+	}
+
+	// Configure verification security.
+	// A delivery provider must be connected before verification requests can succeed.
+	verificationSender := notification.NewSender(deliveryConfig)
+
+	if err := authService.ConfigureVerification(
+		challengeConfig.Pepper,
+		verificationSender,
+	); err != nil {
+		return fmt.Errorf("configure authentication verification: %w", err)
+	}
+
+	authHandler := auth.NewHandler(authService)
+
+	// 5. Construct the emergency dependency chain.
+	emergencyRepository := emergency.NewRepository(pool)
+	emergencyService := emergency.NewService(emergencyRepository)
+	emergencyHandler := emergency.NewHandler(emergencyService)
+
+	// Construct of loocation dependency chain
+	locationRepository := location.NewRepository(pool)
+	locationService := location.NewService(locationRepository)
+	locationHandler := location.NewHandler(locationService)
+	responderRepository := responder.NewRepository(pool)
+	responderService := responder.NewService(responderRepository)
+	responderHandler := responder.NewHandler(responderService)
+
+	// 6. Construct the application router.
+	router, err := httpapi.NewRouter(
+		authenticator,
+		authHandler,
+		emergencyHandler,
+		locationHandler,
+		responderHandler,
+	)
+	if err != nil {
+		return fmt.Errorf("create HTTP router: %w", err)
+	}
+
+	// 7. Configure the HTTP server.
 	server := &http.Server{
 		Addr:              ":8080",
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// Start listening for shutdown signals.
+	// 8. Listen for shutdown signals.
 	shutdownCtx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -52,7 +138,6 @@ func run() error {
 	)
 	defer stop()
 
-	// Start the HTTP server in a separate goroutine.
 	serverErrors := make(chan error, 1)
 
 	go func() {
@@ -60,7 +145,7 @@ func run() error {
 		serverErrors <- server.ListenAndServe()
 	}()
 
-	// Wait for either a server error or a shutdown signal.
+	// 9. Wait for a server error or shutdown signal.
 	select {
 	case err := <-serverErrors:
 		if !errors.Is(err, http.ErrServerClosed) {
@@ -71,7 +156,7 @@ func run() error {
 		log.Println("Shutdown signal received")
 	}
 
-	// Allow active HTTP requests to finish.
+	// 10. Allow active requests to finish.
 	shutdownTimeout, cancel := context.WithTimeout(
 		context.Background(),
 		10*time.Second,
@@ -89,14 +174,4 @@ func run() error {
 	log.Println("HTTP server stopped")
 
 	return nil
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	data := map[string]string{
-		"status": "ok",
-	}
-
-	if err := api.WriteSuccess(w, http.StatusOK, data); err != nil {
-		log.Printf("failed to write health response: %v", err)
-	}
 }
