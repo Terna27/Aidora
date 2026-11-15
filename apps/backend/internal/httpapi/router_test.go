@@ -31,8 +31,11 @@ type fakeAuthenticator struct {
 }
 
 var (
-	_ auth.Authenticator         = (*fakeAuthenticator)(nil)
-	_ emergency.EmergencyCreator = (*fakeCreator)(nil)
+	_ auth.Authenticator           = (*fakeAuthenticator)(nil)
+	_ emergency.EmergencyCreator   = (*fakeCreator)(nil)
+	_ auth.Authenticator           = (*fakeAuthenticator)(nil)
+	_ emergency.EmergencyCreator   = (*fakeCreator)(nil)
+	_ emergency.EmergencyCanceller = (*fakeCreator)(nil)
 )
 
 type fakeLocationService struct{}
@@ -75,6 +78,12 @@ type fakeCreator struct {
 	callCount      int
 	gotPatientID   string
 	gotIdempotency string
+
+	cancelResult    emergency.CancelResult
+	cancelErr       error
+	cancelCallCount int
+	gotEmergencyID  string
+	gotReason       *string
 }
 
 type fakeAuthService struct{}
@@ -177,6 +186,20 @@ func (f *fakeCreator) Create(
 	return f.result, f.err
 }
 
+func (f *fakeCreator) Cancel(
+	ctx context.Context,
+	emergencyID string,
+	patientID string,
+	reason *string,
+) (emergency.CancelResult, error) {
+	f.cancelCallCount++
+	f.gotEmergencyID = emergencyID
+	f.gotPatientID = patientID
+	f.gotReason = reason
+
+	return f.cancelResult, f.cancelErr
+}
+
 func newTestRouter(
 	t *testing.T,
 	authenticator auth.Authenticator,
@@ -204,6 +227,25 @@ func newEmergencyRequest(authorization string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, emergencyPath, strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "key-abc")
+
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
+
+	return req
+}
+
+func newCancellationRequest(
+	authorization string,
+	emergencyID string,
+	body string,
+) *http.Request {
+	req := httptest.NewRequest(
+		http.MethodPost,
+		emergencyPath+"/"+emergencyID+"/cancel",
+		strings.NewReader(body),
+	)
+	req.Header.Set("Content-Type", "application/json")
 
 	if authorization != "" {
 		req.Header.Set("Authorization", authorization)
@@ -522,6 +564,202 @@ func TestRouter_PasswordResetEndpointsArePublic(t *testing.T) {
 				t.Errorf(
 					"Authenticate called %d times, want 0",
 					authenticator.callCount,
+				)
+			}
+		})
+	}
+}
+
+func TestRouter_CancelEmergency_RejectsUnauthenticated(t *testing.T) {
+	authenticator := &fakeAuthenticator{
+		principal: auth.Principal{UserID: testPatientID},
+	}
+	creator := &fakeCreator{}
+	router := newTestRouter(t, authenticator, creator)
+
+	req := newCancellationRequest("", "emg-123", `{"reason":"Changed my mind"}`)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"status = %d, want %d; body = %s",
+			rec.Code,
+			http.StatusUnauthorized,
+			rec.Body.String(),
+		)
+	}
+
+	if creator.cancelCallCount != 0 {
+		t.Errorf(
+			"Cancel called %d times, want 0",
+			creator.cancelCallCount,
+		)
+	}
+
+	resp := decodeResponse(t, rec)
+	if resp.Error == nil || resp.Error.Code != "UNAUTHENTICATED" {
+		t.Errorf("error = %+v, want UNAUTHENTICATED", resp.Error)
+	}
+}
+
+func TestRouter_CancelEmergency_ForwardsAuthenticatedRequest(t *testing.T) {
+	authenticator := &fakeAuthenticator{
+		principal: auth.Principal{UserID: testPatientID},
+	}
+	creator := &fakeCreator{}
+	router := newTestRouter(t, authenticator, creator)
+
+	const (
+		emergencyID = "emg-cancel-123"
+		reason      = "Changed my mind"
+	)
+
+	req := newCancellationRequest(
+		"Bearer "+testToken,
+		emergencyID,
+		`{"reason":"Changed my mind"}`,
+	)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"status = %d, want %d; body = %s",
+			rec.Code,
+			http.StatusOK,
+			rec.Body.String(),
+		)
+	}
+
+	if authenticator.callCount != 1 {
+		t.Errorf("Authenticate called %d times, want 1", authenticator.callCount)
+	}
+
+	if authenticator.receivedToken != testToken {
+		t.Errorf(
+			"received token = %q, want %q",
+			authenticator.receivedToken,
+			testToken,
+		)
+	}
+
+	if creator.cancelCallCount != 1 {
+		t.Fatalf(
+			"Cancel called %d times, want 1",
+			creator.cancelCallCount,
+		)
+	}
+
+	if creator.gotEmergencyID != emergencyID {
+		t.Errorf(
+			"emergency ID = %q, want %q",
+			creator.gotEmergencyID,
+			emergencyID,
+		)
+	}
+
+	if creator.gotPatientID != testPatientID {
+		t.Errorf(
+			"patient ID = %q, want %q",
+			creator.gotPatientID,
+			testPatientID,
+		)
+	}
+
+	if creator.gotReason == nil {
+		t.Fatal("reason = nil, want a reason")
+	}
+
+	if *creator.gotReason != reason {
+		t.Errorf("reason = %q, want %q", *creator.gotReason, reason)
+	}
+
+	resp := decodeResponse(t, rec)
+	if !resp.Success {
+		t.Error("success = false, want true")
+	}
+}
+
+func TestRouter_CancelEmergency_MapsServiceErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		serviceErr error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "emergency not found",
+			serviceErr: emergency.ErrEmergencyNotFound,
+			wantStatus: http.StatusNotFound,
+			wantCode:   "EMERGENCY_NOT_FOUND",
+		},
+		{
+			name:       "cancellation access denied",
+			serviceErr: emergency.ErrCancellationAccessDenied,
+			wantStatus: http.StatusForbidden,
+			wantCode:   "CANCELLATION_FORBIDDEN",
+		},
+		{
+			name:       "invalid emergency state",
+			serviceErr: emergency.ErrInvalidTransition,
+			wantStatus: http.StatusConflict,
+			wantCode:   "INVALID_EMERGENCY_STATE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authenticator := &fakeAuthenticator{
+				principal: auth.Principal{UserID: testPatientID},
+			}
+			creator := &fakeCreator{
+				cancelErr: tt.serviceErr,
+			}
+			router := newTestRouter(t, authenticator, creator)
+
+			req := newCancellationRequest(
+				"Bearer "+testToken,
+				"emg-123",
+				`{"reason":"Test cancellation"}`,
+			)
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf(
+					"status = %d, want %d; body = %s",
+					rec.Code,
+					tt.wantStatus,
+					rec.Body.String(),
+				)
+			}
+
+			if creator.cancelCallCount != 1 {
+				t.Errorf(
+					"Cancel called %d times, want 1",
+					creator.cancelCallCount,
+				)
+			}
+
+			resp := decodeResponse(t, rec)
+
+			if resp.Success {
+				t.Error("success = true, want false")
+			}
+
+			if resp.Error == nil {
+				t.Fatal("error = nil, want an API error")
+			}
+
+			if resp.Error.Code != tt.wantCode {
+				t.Errorf(
+					"error code = %q, want %q",
+					resp.Error.Code,
+					tt.wantCode,
 				)
 			}
 		})
