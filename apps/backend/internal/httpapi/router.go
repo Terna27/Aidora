@@ -66,6 +66,7 @@ func NewRouter(
 		r.Post("/api/v1/emergencies/{id}/locations/patient", locationHandler.SavePatientLocation)
 		r.Post("/api/v1/emergencies/{id}/locations/responder", locationHandler.SaveResponderLocation)
 		r.Get("/api/v1/emergencies/{id}/locations", locationHandler.GetLocations)
+		r.Post("/api/v1/emergencies/{id}/cancel", emergencyHandler.Cancel)
 	})
 
 	return router, nil
