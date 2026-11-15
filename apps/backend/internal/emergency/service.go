@@ -110,3 +110,27 @@ func normalizeString(value *string) *string {
 
 	return &normalized
 }
+
+func (service *Service) Cancel(
+    ctx context.Context,
+    emergencyID string,
+    patientID string,
+    reason *string,
+) (CancelResult, error) {
+    if strings.TrimSpace(patientID) == "" {
+        return CancelResult{}, errors.New("patient identity is required")
+    }
+
+    if strings.TrimSpace(emergencyID) == "" {
+        return CancelResult{}, errors.New("emergency ID is required")
+    }
+
+    reason = normalizeString(reason)
+
+    return service.repository.Cancel(
+        ctx,
+        strings.TrimSpace(emergencyID),
+        strings.TrimSpace(patientID),
+        reason,
+    )
+}
