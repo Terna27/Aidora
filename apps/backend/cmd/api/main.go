@@ -124,8 +124,13 @@ func run() error {
 	}
 
 	// 7. Configure the HTTP server.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              ":" + port,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -141,7 +146,7 @@ func run() error {
 	serverErrors := make(chan error, 1)
 
 	go func() {
-		log.Println("AIDORA API server starting on :8080")
+		log.Printf("AIDORA API server starting on :%s", port)
 		serverErrors <- server.ListenAndServe()
 	}()
 
