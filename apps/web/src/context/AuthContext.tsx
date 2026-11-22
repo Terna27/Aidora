@@ -16,7 +16,6 @@ import { authService } from '../services/auth/authService';
 interface AuthContextValue {
   session: AuthSession;
   loading: boolean;
-  isMockMode: boolean;
   login: (payload: LoginPayload) => Promise<{ success: boolean; session?: AuthSession; error?: string }>;
   registerPatient: (payload: PatientRegisterPayload) => Promise<{ success: boolean; session?: AuthSession; error?: string }>;
   registerResponder: (payload: ResponderRegisterPayload) => Promise<{ success: boolean; session?: AuthSession; error?: string }>;
@@ -122,7 +121,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         session,
         loading,
-        isMockMode: authService.isMockMode(),
         login,
         registerPatient,
         registerResponder,

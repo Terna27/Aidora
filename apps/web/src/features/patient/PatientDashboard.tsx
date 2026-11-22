@@ -207,7 +207,9 @@ export const PatientDashboard: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Radio className="pulse-ring" size={18} />
                 <span style={{ fontSize: '14px', fontWeight: 700, letterSpacing: '0.3px' }}>
-                  ACTIVE EMERGENCY DISPATCH IN PROGRESS
+                  {activeEmergency.state === 'CREATED'
+                    ? 'EMERGENCY REQUEST CREATED — DISPATCH NOT YET CONFIRMED'
+                    : `EMERGENCY STATUS: ${activeEmergency.state.replace(/_/g, ' ')}`}
                 </span>
               </div>
               <span style={{ fontSize: '12px', fontWeight: 600, backgroundColor: 'rgba(0,0,0,0.25)', padding: '2px 8px', borderRadius: '4px' }}>
@@ -315,8 +317,8 @@ export const PatientDashboard: React.FC = () => {
                   <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>ASSIGNED UNIT / ETA</div>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: '#175cd3', marginTop: '2px' }}>
                     {activeEmergency.assignedResponderName
-                      ? `${activeEmergency.assignedResponderName} (${activeEmergency.assignedVehicleType || 'Ambulance'})`
-                      : 'Searching nearest unit...'}
+                      ? `${activeEmergency.assignedResponderName} (${activeEmergency.assignedVehicleType || 'Vehicle not specified'})`
+                      : 'No responder assigned yet'}
                   </div>
                   {activeEmergency.etaMinutes && (
                     <div style={{ fontSize: '11px', color: '#027a48', fontWeight: 600 }}>
@@ -326,102 +328,8 @@ export const PatientDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Actions & Simulation controls */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                {/* Advance for testing */}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {activeEmergency.state === 'DISPATCHING' && (
-                    <button
-                      onClick={() => patientService.advanceState('ACCEPTED', 'Responder accepted emergency call')}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#0f1a2c',
-                        color: '#ffffff',
-                        borderRadius: '5px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Simulate Responder Acceptance
-                    </button>
-                  )}
-                  {activeEmergency.state === 'ACCEPTED' && (
-                    <button
-                      onClick={() => patientService.advanceState('PICKUP_ARRIVED', 'Responder arrived at pickup')}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#0f1a2c',
-                        color: '#ffffff',
-                        borderRadius: '5px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Simulate Responder Arrival
-                    </button>
-                  )}
-                  {activeEmergency.state === 'PICKUP_ARRIVED' && (
-                    <button
-                      onClick={() => patientService.advanceState('PATIENT_ONBOARD', 'Patient safely onboarded')}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#0f1a2c',
-                        color: '#ffffff',
-                        borderRadius: '5px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Simulate Patient Onboard
-                    </button>
-                  )}
-                  {activeEmergency.state === 'PATIENT_ONBOARD' && (
-                    <button
-                      onClick={() => patientService.advanceState('IN_TRANSIT', 'En route to hospital')}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#0f1a2c',
-                        color: '#ffffff',
-                        borderRadius: '5px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Simulate In Transit
-                    </button>
-                  )}
-                  {activeEmergency.state === 'IN_TRANSIT' && (
-                    <button
-                      onClick={() => patientService.advanceState('ARRIVED', 'Arrived at General Hospital Apex')}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#0f1a2c',
-                        color: '#ffffff',
-                        borderRadius: '5px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Simulate Facility Arrival
-                    </button>
-                  )}
-                  {activeEmergency.state === 'ARRIVED' && (
-                    <button
-                      onClick={() => patientService.advanceState('COMPLETED', 'Handover completed to triage team')}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#12b76a',
-                        color: '#ffffff',
-                        borderRadius: '5px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Complete Handover
-                    </button>
-                  )}
-                </div>
-
+              {/* Emergency actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                 {/* Cancel Emergency button (with permission guard) */}
                 <div>
                   {['CREATED', 'DISPATCHING', 'ACCEPTED', 'PICKUP_ARRIVED'].includes(

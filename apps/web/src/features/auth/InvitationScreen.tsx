@@ -8,11 +8,10 @@ import {
   Ticket,
   CheckCircle2,
   AlertTriangle,
-  Sparkles,
-} from 'lucide-react';
+  } from 'lucide-react';
 
 export const InvitationScreen: React.FC = () => {
-  const { validateInvitation, acceptInvitation, isMockMode, loading } = useAuth();
+  const { validateInvitation, acceptInvitation, loading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { token: urlParamToken } = useParams<{ token?: string }>();
@@ -209,93 +208,6 @@ export const InvitationScreen: React.FC = () => {
               </div>
             )}
 
-            {/* Quick Test Tokens in Mock Mode */}
-            {isMockMode && (
-              <div
-                style={{
-                  backgroundColor: '#f8fafc',
-                  border: '1px dashed #cbd5e1',
-                  borderRadius: '8px',
-                  padding: '12px 14px',
-                  marginTop: '18px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                  <Sparkles size={14} color="#f79009" />
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>
-                    DEVELOPMENT TEST TOKENS
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTokenInput('HOSP-INV-VALID-2026');
-                      checkToken('HOSP-INV-VALID-2026');
-                    }}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: '4px',
-                      border: '1px solid #e2e8f0',
-                      backgroundColor: '#ffffff',
-                      fontSize: '11.5px',
-                      textAlign: 'left',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <span>🏥 <strong>HOSP-INV-VALID-2026</strong> (General Hospital Apex - Triage Nurse)</span>
-                    <span style={{ color: '#027a48', fontSize: '10px', fontWeight: 700 }}>VALID</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTokenInput('DISP-AUTH-VALID-884');
-                      checkToken('DISP-AUTH-VALID-884');
-                    }}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: '4px',
-                      border: '1px solid #e2e8f0',
-                      backgroundColor: '#ffffff',
-                      fontSize: '11.5px',
-                      textAlign: 'left',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <span>📻 <strong>DISP-AUTH-VALID-884</strong> (FCT Dispatch Center - Dispatcher)</span>
-                    <span style={{ color: '#027a48', fontSize: '10px', fontWeight: 700 }}>VALID</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTokenInput('HOSP-INV-EXPIRED-2025');
-                      checkToken('HOSP-INV-EXPIRED-2025');
-                    }}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: '4px',
-                      border: '1px solid #e2e8f0',
-                      backgroundColor: '#fffbeb',
-                      fontSize: '11.5px',
-                      textAlign: 'left',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <span>⚠️ <strong>HOSP-INV-EXPIRED-2025</strong> (Expired Invitation)</span>
-                    <span style={{ color: '#b45309', fontSize: '10px', fontWeight: 700 }}>EXPIRED</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         ) : (
           /* Step 2: Validated Invitation Confirmation & Account Creation */

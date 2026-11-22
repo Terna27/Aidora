@@ -37,25 +37,55 @@ export interface OrganizationMembership {
 export interface UserProfile {
   id: string;
   fullName: string;
-  phoneNumber: string;
+  phoneNumber?: string;
   email?: string;
+
+  // Frontend compatibility
   role: UserRole;
+
+  // Backend role representation
+  roles?: UserRole[];
+
   communityOrVillage?: string;
-  verificationStatus: VerificationStatus;
+  verificationStatus?: VerificationStatus;
   organization?: OrganizationMembership;
-  // Specific role metadata
+
   responderVehicleType?: VehicleCategory;
   responderVehicleReg?: string;
-  createdAt: string;
-  updatedAt: string;
+
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AuthSession {
   user: UserProfile | null;
+
+  // Access token
   token: string | null;
-  tokenExpiry: string | null; // ISO timestamp
+  tokenExpiry: string | null;
+
+  // Refresh token
+  refreshToken?: string | null;
+  refreshTokenExpiry?: string | null;
+
   isAuthenticated: boolean;
-  isMock: boolean;
+}
+
+export interface BackendUser {
+  id: string;
+  fullName: string;
+  email?: string;
+  phoneNumber?: string;
+  roles: UserRole[];
+}
+
+export interface BackendTokenPair {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  accessExpiresAt: string;
+  refreshExpiresAt: string;
+  user: BackendUser;
 }
 
 // ----------------------------------------------------------------------

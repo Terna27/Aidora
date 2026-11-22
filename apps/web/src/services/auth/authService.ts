@@ -1,7 +1,6 @@
 /**
- * Unified Authentication Service for Aidora Web
- * Orchestrates authentication requests, enforcing strict separation
- * between production API contracts and isolated development fixtures.
+ * Authentication Service for Aidora Web
+ * Handles authentication through the AIDORA backend API.
  */
 
 import {
@@ -15,36 +14,13 @@ import {
   InvitationValidationResult,
   ForgotPasswordPayload,
   ResetPasswordPayload,
+  BackendTokenPair,
+  BackendUser,
+  UserRole,
 } from '../../types/auth';
 import { apiClient } from '../apiClient';
-import { mockAuthAdapter } from './mockAuthAdapter';
-
-const getEnvMockAuth = (): boolean => {
-  try {
-    // @ts-expect-error import.meta.env
-    if (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_ENABLE_MOCK_AUTH !== undefined) {
-      // @ts-expect-error import.meta.env
-      return import.meta.env.VITE_ENABLE_MOCK_AUTH === 'true';
-    }
-  } catch {
-    // fall through
-  }
-
-  try {
-    if (typeof process !== 'undefined' && process.env?.VITE_ENABLE_MOCK_AUTH !== undefined) {
-      return process.env.VITE_ENABLE_MOCK_AUTH === 'true';
-    }
-  } catch {
-    // fall through
-  }
-
-  // Default to true in development test mode
-  return true;
-};
 
 export interface IAuthService {
-  isMockMode(): boolean;
-  setMockMode(enabled: boolean): void;
   login(payload: LoginPayload): Promise<{ success: boolean; session?: AuthSession; error?: string }>;
   registerPatient(payload: PatientRegisterPayload): Promise<{ success: boolean; session?: AuthSession; error?: string }>;
   registerResponder(payload: ResponderRegisterPayload): Promise<{ success: boolean; session?: AuthSession; error?: string }>;
@@ -60,7 +36,6 @@ export interface IAuthService {
 }
 
 export class AuthService implements IAuthService {
-  private mockEnabled: boolean = getEnvMockAuth();
   private listeners: ((session: AuthSession) => void)[] = [];
   private memorySession: AuthSession | null = null;
 
@@ -83,14 +58,6 @@ export class AuthService implements IAuthService {
     }
   }
 
-  public isMockMode(): boolean {
-    return this.mockEnabled;
-  }
-
-  public setMockMode(enabled: boolean): void {
-    this.mockEnabled = enabled;
-  }
-
   public subscribe(listener: (session: AuthSession) => void): () => void {
     this.listeners.push(listener);
     return () => {
@@ -107,25 +74,20 @@ export class AuthService implements IAuthService {
 
   private saveSession(session: AuthSession) {
     this.memorySession = session;
-    if (this.mockEnabled) {
-      mockAuthAdapter.setSession(session);
-    }
+
     if (typeof window !== 'undefined' && window.sessionStorage) {
       try {
         window.sessionStorage.setItem('aidline_web_session', JSON.stringify(session));
       } catch {
-        // storage disabled or quota exceeded
+        // Storage disabled or quota exceeded
       }
     }
+
     apiClient.setToken(session.token);
     this.notify();
   }
 
   public getCurrentSession(): AuthSession {
-    if (this.mockEnabled) {
-      return mockAuthAdapter.getCurrentSession();
-    }
-
     if (this.memorySession) {
       // Check expiry
       if (this.memorySession.tokenExpiry && new Date(this.memorySession.tokenExpiry).getTime() < Date.now()) {
@@ -135,7 +97,6 @@ export class AuthService implements IAuthService {
           token: null,
           tokenExpiry: null,
           isAuthenticated: false,
-          isMock: false,
         };
       }
       return { ...this.memorySession };
@@ -146,7 +107,6 @@ export class AuthService implements IAuthService {
       token: null,
       tokenExpiry: null,
       isAuthenticated: false,
-      isMock: this.mockEnabled,
     };
   }
 
@@ -156,39 +116,52 @@ export class AuthService implements IAuthService {
   public async login(
     payload: LoginPayload
   ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    if (this.mockEnabled) {
-      const res = await mockAuthAdapter.login(payload);
-      if (res.success && res.session) {
-        this.saveSession(res.session);
-      }
-      return res;
-    }
-
-    // Production flow: Never fake response if backend is missing!
-    const response = await apiClient.request<{ token: string; user: AuthSession['user'] }>(
+    const response = await apiClient.request<BackendTokenPair>(
       '/auth/login',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          identifier: payload.identifier,
+          password: payload.password,
+        }),
       }
     );
 
     if (!response.success || !response.data) {
       return {
         success: false,
-        error: `SERVICE_UNAVAILABLE: Production authentication endpoints are currently unreachable (${response.error || 'Connection refused'}). Check your network or contact system administrator.`,
+        error: response.error || 'Unable to log in. Please try again.',
+      };
+    }
+
+    const backendUser = response.data.user;
+    const primaryRole = backendUser.roles[0];
+
+    if (!primaryRole) {
+      return {
+        success: false,
+        error: 'The backend returned a user without an assigned role.',
       };
     }
 
     const session: AuthSession = {
-      user: response.data.user,
-      token: response.data.token,
-      tokenExpiry: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+      user: {
+        id: backendUser.id,
+        fullName: backendUser.fullName,
+        email: backendUser.email,
+        phoneNumber: backendUser.phoneNumber,
+        roles: backendUser.roles,
+        role: primaryRole as UserRole,
+      },
+      token: response.data.accessToken,
+      tokenExpiry: response.data.accessExpiresAt,
+      refreshToken: response.data.refreshToken,
+      refreshTokenExpiry: response.data.refreshExpiresAt,
       isAuthenticated: true,
-      isMock: false,
     };
 
     this.saveSession(session);
+
     return { success: true, session };
   }
 
@@ -198,281 +171,109 @@ export class AuthService implements IAuthService {
   public async registerPatient(
     payload: PatientRegisterPayload
   ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    if (this.mockEnabled) {
-      const res = await mockAuthAdapter.registerPatient(payload);
-      if (res.success && res.session) {
-        this.saveSession(res.session);
-      }
-      return res;
-    }
-
-    const response = await apiClient.request<{ token: string; user: AuthSession['user'] }>(
-      '/auth/register/patient',
+    const response = await apiClient.request<BackendUser>(
+      '/auth/register',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          fullName: payload.fullName,
+          email: payload.email || undefined,
+          phoneNumber: payload.phoneNumber || undefined,
+          password: payload.password,
+        }),
       }
     );
 
     if (!response.success || !response.data) {
       return {
         success: false,
-        error: `SERVICE_UNAVAILABLE: Production patient registration endpoint is unreachable (${response.error || 'Connection refused'}).`,
+        error: response.error || 'Unable to register. Please try again.',
       };
     }
 
-    const session: AuthSession = {
-      user: response.data.user,
-      token: response.data.token,
-      tokenExpiry: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-      isAuthenticated: true,
-      isMock: false,
-    };
-
-    this.saveSession(session);
-    return { success: true, session };
+    // Registration creates an unverified account, not an authenticated session.
+    return { success: true };
   }
 
   // ----------------------------------------------------------------------
   // Responder Registration
   // ----------------------------------------------------------------------
   public async registerResponder(
-    payload: ResponderRegisterPayload
+    _payload: ResponderRegisterPayload
   ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    if (this.mockEnabled) {
-      const res = await mockAuthAdapter.registerResponder(payload);
-      if (res.success && res.session) {
-        this.saveSession(res.session);
-      }
-      return res;
-    }
-
-    const response = await apiClient.request<{ token: string; user: AuthSession['user'] }>(
-      '/auth/register/responder',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (!response.success || !response.data) {
-      return {
-        success: false,
-        error:
-          response.error ||
-          'SERVICE_UNAVAILABLE: Production responder registration endpoint is unreachable.',
-      };
-    }
-
-    const session: AuthSession = {
-      user: response.data.user,
-      token: response.data.token,
-      tokenExpiry: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-      isAuthenticated: true,
-      isMock: false,
+    return {
+      success: false,
+      error: 'Responder registration is not currently supported by the backend.',
     };
-
-    this.saveSession(session);
-    return { success: true, session };
   }
+
 
   // ----------------------------------------------------------------------
   // Hospital Registration
   // ----------------------------------------------------------------------
   public async registerHospital(
-    payload: HospitalRegisterPayload
+    _payload: HospitalRegisterPayload
   ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    if (this.mockEnabled) {
-      const res = await mockAuthAdapter.registerHospital(payload);
-      if (res.success && res.session) {
-        this.saveSession(res.session);
-      }
-      return res;
-    }
-
-    const response = await apiClient.request<{ token: string; user: AuthSession['user'] }>(
-      '/auth/register/hospital',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (!response.success || !response.data) {
-      return {
-        success: false,
-        error:
-          response.error ||
-          'SERVICE_UNAVAILABLE: Production hospital organization registration endpoint is unreachable.',
-      };
-    }
-
-    const session: AuthSession = {
-      user: response.data.user,
-      token: response.data.token,
-      tokenExpiry: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-      isAuthenticated: true,
-      isMock: false,
+    return {
+      success: false,
+      error: 'Hospital registration is not currently supported by the backend.',
     };
-
-    this.saveSession(session);
-    return { success: true, session };
   }
 
   // ----------------------------------------------------------------------
   // Invitations
   // ----------------------------------------------------------------------
-  public async validateInvitation(token: string): Promise<InvitationValidationResult> {
-    if (this.mockEnabled) {
-      return mockAuthAdapter.validateInvitation(token);
-    }
-
-    const res = await apiClient.request<InvitationValidationResult>(
-      `/auth/invitations/${encodeURIComponent(token)}`
-    );
-
-    if (!res.success || !res.data) {
-      return {
-        valid: false,
-        token,
-        organizationId: '',
-        organizationName: '',
-        organizationType: 'HOSPITAL',
-        assignedRole: '',
-        expiresAt: '',
-        error: res.error || 'SERVICE_UNAVAILABLE: Unable to validate invitation token with production server.',
-      };
-    }
-
-    return res.data;
-  }
-
-  public async acceptInvitation(
-    payload: AcceptInvitationPayload
-  ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    if (this.mockEnabled) {
-      const res = await mockAuthAdapter.acceptInvitation(payload);
-      if (res.success && res.session) {
-        this.saveSession(res.session);
-      }
-      return res;
-    }
-
-    const response = await apiClient.request<{ token: string; user: AuthSession['user'] }>(
-      '/auth/invitations/accept',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (!response.success || !response.data) {
-      return {
-        success: false,
-        error:
-          response.error ||
-          'SERVICE_UNAVAILABLE: Production invitation acceptance endpoint is unreachable.',
-      };
-    }
-
-    const session: AuthSession = {
-      user: response.data.user,
-      token: response.data.token,
-      tokenExpiry: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-      isAuthenticated: true,
-      isMock: false,
+  public async validateInvitation(
+    _token: string
+  ): Promise<InvitationValidationResult> {
+    return {
+      valid: false,
+      token: _token,
+      organizationId: '',
+      organizationName: '',
+      organizationType: 'HOSPITAL',
+      assignedRole: '',
+      expiresAt: '',
+      error: 'Invitation validation is not currently supported by the backend.',
     };
-
-    this.saveSession(session);
-    return { success: true, session };
+  }
+  public async acceptInvitation(
+    _payload: AcceptInvitationPayload
+  ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
+    return {
+      success: false,
+      error: 'Invitation acceptance is not currently supported by the backend.',
+    };
   }
 
   public async registerDispatcherWithToken(
-    payload: DispatcherRegisterPayload
+    _payload: DispatcherRegisterPayload
   ): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    if (this.mockEnabled) {
-      const res = await mockAuthAdapter.registerDispatcherWithToken(payload);
-      if (res.success && res.session) {
-        this.saveSession(res.session);
-      }
-      return res;
-    }
-
-    const response = await apiClient.request<{ token: string; user: AuthSession['user'] }>(
-      '/auth/register/dispatcher',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (!response.success || !response.data) {
-      return {
-        success: false,
-        error:
-          response.error ||
-          'SERVICE_UNAVAILABLE: Production dispatcher registration endpoint is unreachable.',
-      };
-    }
-
-    const session: AuthSession = {
-      user: response.data.user,
-      token: response.data.token,
-      tokenExpiry: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-      isAuthenticated: true,
-      isMock: false,
+    return {
+      success: false,
+      error: 'Dispatcher registration is not currently supported by the backend.',
     };
-
-    this.saveSession(session);
-    return { success: true, session };
   }
-
   // ----------------------------------------------------------------------
   // Password Recovery
   // ----------------------------------------------------------------------
   public async forgotPassword(
-    payload: ForgotPasswordPayload
+    _payload: ForgotPasswordPayload
   ): Promise<{ success: boolean; message: string; error?: string }> {
-    if (this.mockEnabled) {
-      return mockAuthAdapter.forgotPassword(payload);
-    }
-
-    const res = await apiClient.request<{ message: string }>('/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.success) {
-      return {
-        success: false,
-        message: '',
-        error: res.error || 'SERVICE_UNAVAILABLE: Password recovery endpoint is unreachable.',
-      };
-    }
-
-    return { success: true, message: res.data?.message || 'Password recovery instructions dispatched.' };
+    return {
+      success: false,
+      message: '',
+      error: 'Password recovery is not currently available because the backend workflow has not been implemented.',
+    };
   }
 
   public async resetPassword(
-    payload: ResetPasswordPayload
+    _payload: ResetPasswordPayload
   ): Promise<{ success: boolean; error?: string }> {
-    if (this.mockEnabled) {
-      return mockAuthAdapter.resetPassword(payload);
-    }
-
-    const res = await apiClient.request<{ success: boolean }>('/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.success) {
-      return {
-        success: false,
-        error: res.error || 'SERVICE_UNAVAILABLE: Password reset endpoint is unreachable.',
-      };
-    }
-
-    return { success: true };
+    return {
+      success: false,
+      error: 'Password reset is not currently available because the backend workflow has not been implemented.',
+    };
   }
 
   // ----------------------------------------------------------------------
@@ -480,23 +281,34 @@ export class AuthService implements IAuthService {
   // ----------------------------------------------------------------------
   private logoutSync(): void {
     this.memorySession = null;
-    mockAuthAdapter.logout();
+
     if (typeof window !== 'undefined' && window.sessionStorage) {
       try {
         window.sessionStorage.removeItem('aidline_web_session');
       } catch {
-        // ignore
+        // Ignore storage errors.
       }
     }
+
     apiClient.setToken(null);
     this.notify();
   }
 
   public async logout(): Promise<void> {
-    if (!this.mockEnabled && this.memorySession?.token) {
-      await apiClient.request('/auth/logout', { method: 'POST' });
+    const session = this.memorySession;
+
+    try {
+      if (session?.token && session?.refreshToken) {
+        await apiClient.request('/auth/logout', {
+          method: 'POST',
+          body: JSON.stringify({
+            refreshToken: session.refreshToken,
+          }),
+        });
+      }
+    } finally {
+      this.logoutSync();
     }
-    this.logoutSync();
   }
 }
 

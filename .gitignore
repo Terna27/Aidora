@@ -26,3 +26,17 @@ Thumbs.db
 /api
 *.exe
 *.out
+# Node.js dependencies
+node_modules/
+
+# Frontend build output
+dist/
+build/
+
+# npm logs
+npm-debug.log*
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local

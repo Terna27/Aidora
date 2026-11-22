@@ -1,269 +1,574 @@
-/**
- * Patient Service
- * Manages patient emergencies, safety rules, contacts and health records
- */
 
 import {
   EmergencyRecord,
   EmergencyState,
   EmergencyLocation,
-  Facility,
+  BackendCreateEmergencyResponse,
 } from '../types/emergency';
-import { PatientProfile, EmergencyContact, TriggerSOSPayload } from '../types/patient';
+import {
+  PatientProfile,
+  EmergencyContact,
+  TriggerSOSPayload,
+} from '../types/patient';
+import { authService } from './auth/authService';
 import { apiClient } from './apiClient';
 
-const INITIAL_PATIENT: PatientProfile = {
-  id: 'pat-1001',
-  fullName: 'Amina Bello',
-  phone: '+234 803 123 4567',
-  bloodGroup: 'O+',
-  gestationalAgeWeeks: 34,
-  allergies: ['Penicillin'],
-  medicalNotes: 'High-risk pregnancy, 3rd trimester. Prior mild hypertension.',
-  emergencyContacts: [
-    {
-      id: 'cnt-1',
-      name: 'Ibrahim Bello',
-      relationship: 'Husband',
-      phone: '+234 802 987 6543',
-      isPrimary: true,
-    },
-    {
-      id: 'cnt-2',
-      name: 'Dr. Fatima Aliyu',
-      relationship: 'Primary Midwife',
-      phone: '+234 805 111 2233',
-      isPrimary: false,
-    },
-  ],
+type PendingSOS = {
+  patientId: string;
+  key: string;
+  body: string;
+  createdAt: number;
 };
 
-const DEFAULT_FACILITY: Facility = {
-  id: 'fac-central',
-  name: 'General Hospital Apex',
-  type: 'HOSPITAL',
-  address: 'Hospital Road, Central District',
-  landmark: 'Near City Gate',
-  totalBeds: 120,
-  availableBeds: 14,
-  specialties: ['Obstetrics', 'Trauma', 'Emergency Surgery'],
-  contactPhone: '+234 800 999 0001',
-  coords: { lat: 9.0578, lng: 7.4951 },
+type SOSResult = {
+  success: boolean;
+  emergency?: EmergencyRecord;
+  error?: string;
 };
+
+const PENDING_KEY = 'aidora_pending_sos_v2';
+const CONFIRMED_KEY = 'aidora_confirmed_sos_v1';
+const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const clone = <T,>(value: T): T =>
+  JSON.parse(JSON.stringify(value)) as T;
 
 export class PatientService {
-  private profile: PatientProfile = JSON.parse(JSON.stringify(INITIAL_PATIENT));
+  private profile: PatientProfile = {
+    id: '',
+    fullName: '',
+    phone: '',
+    bloodGroup: '',
+    emergencyContacts: [],
+  };
+
   private activeEmergency: EmergencyRecord | null = null;
   private history: EmergencyRecord[] = [];
   private listeners: (() => void)[] = [];
 
+  private pendingSOS: PendingSOS | null = null;
+
   constructor() {
-    // Populate an initial completed history entry
-    this.history.push({
-      id: 'emg-hist-01',
-      state: 'COMPLETED',
-      severity: 'URGENT',
-      chiefComplaint: 'Acute prenatal pain',
-      reportedBy: 'PATIENT',
-      location: {
-        address: 'Block 4, Garki District',
-        landmark: 'Near Post Office',
-        type: 'MANUAL',
-      },
-      destinationFacility: DEFAULT_FACILITY,
-      assignedResponderName: 'S. Musa',
-      assignedVehicleType: 'Ambulance',
-      assignedVehicleReg: 'ABJ-342-XY',
-      milestones: [
-        { state: 'CREATED', timestamp: '2026-10-14T08:00:00Z' },
-        { state: 'DISPATCHING', timestamp: '2026-10-14T08:01:00Z' },
-        { state: 'ACCEPTED', timestamp: '2026-10-14T08:03:00Z' },
-        { state: 'PICKUP_ARRIVED', timestamp: '2026-10-14T08:14:00Z' },
-        { state: 'PATIENT_ONBOARD', timestamp: '2026-10-14T08:18:00Z' },
-        { state: 'IN_TRANSIT', timestamp: '2026-10-14T08:20:00Z' },
-        { state: 'ARRIVED', timestamp: '2026-10-14T08:32:00Z' },
-        { state: 'COMPLETED', timestamp: '2026-10-14T08:35:00Z', note: 'Handed over to triage lead' },
-      ],
-      createdAt: '2026-10-14T08:00:00Z',
-      updatedAt: '2026-10-14T08:35:00Z',
-    });
+    this.loadPendingSOS();
+  }
+
+  private currentPatientId(): string | null {
+    const session = authService.getCurrentSession();
+
+    if (!session.isAuthenticated || !session.user?.id) {
+      return null;
+    }
+
+    return session.user.id;
+  }
+
+  private generateSOSKey(): string {
+    return crypto.randomUUID();
+  }
+
+  private loadPendingSOS(): void {
+    try {
+      const raw = sessionStorage.getItem(PENDING_KEY);
+      if (!raw) return;
+
+      const parsed: unknown = JSON.parse(raw);
+
+      if (!parsed || typeof parsed !== 'object') return;
+
+      const value = parsed as Partial<PendingSOS>;
+
+      if (
+        typeof value.patientId !== 'string' ||
+        !value.patientId ||
+        typeof value.key !== 'string' ||
+        !value.key ||
+        typeof value.body !== 'string' ||
+        !value.body ||
+        typeof value.createdAt !== 'number' ||
+        !Number.isFinite(value.createdAt)
+      ) {
+        return;
+      }
+
+      this.pendingSOS = value as PendingSOS;
+    } catch {
+      // Storage is unavailable or invalid.
+    }
+  }
+
+  private savePendingSOS(): void {
+    if (!this.pendingSOS) return;
+
+    sessionStorage.setItem(
+      PENDING_KEY,
+      JSON.stringify(this.pendingSOS)
+    );
+  }
+
+  private clearPendingSOS(): void {
+    this.pendingSOS = null;
+
+    try {
+      sessionStorage.removeItem(PENDING_KEY);
+    } catch {
+      // No action required.
+    }
+  }
+
+  private restoreConfirmedEmergency(patientId: string): void {
+    try {
+      const raw = sessionStorage.getItem(CONFIRMED_KEY);
+      if (!raw) return;
+
+      const stored = JSON.parse(raw) as {
+        patientId?: string;
+        emergency?: EmergencyRecord;
+      };
+
+      if (
+        stored.patientId === patientId &&
+        stored.emergency?.id
+      ) {
+        this.activeEmergency = stored.emergency;
+      }
+    } catch {
+      // Do not manufacture emergency state.
+    }
+  }
+
+  private saveConfirmedEmergency(
+    patientId: string,
+    emergency: EmergencyRecord
+  ): void {
+    try {
+      sessionStorage.setItem(
+        CONFIRMED_KEY,
+        JSON.stringify({ patientId, emergency })
+      );
+    } catch {
+      // Backend confirmation remains valid even if
+      // browser storage is unavailable.
+    }
   }
 
   public subscribe(listener: () => void): () => void {
     this.listeners.push(listener);
+
     return () => {
-      this.listeners = this.listeners.filter((l) => l !== listener);
+      this.listeners = this.listeners.filter(
+        (item) => item !== listener
+      );
     };
   }
 
-  private notify() {
-    for (const l of this.listeners) {
-      l();
+  private notify(): void {
+    for (const listener of this.listeners) {
+      listener();
     }
   }
 
   public getProfile(): PatientProfile {
-    return JSON.parse(JSON.stringify(this.profile));
+    const user = authService.getCurrentSession().user;
+
+    if (!user) {
+      return {
+        id: '',
+        fullName: '',
+        phone: '',
+        bloodGroup: '',
+        emergencyContacts: [],
+      };
+    }
+
+    if (this.profile.id !== user.id) {
+      this.profile = {
+        id: user.id,
+        fullName: user.fullName,
+        phone: user.phoneNumber ?? '',
+        bloodGroup: '',
+        emergencyContacts: [],
+      };
+    }
+
+    return clone(this.profile);
   }
 
-  public updateProfile(updates: Partial<PatientProfile>): PatientProfile {
-    this.profile = { ...this.profile, ...updates };
+  public updateProfile(
+    updates: Partial<PatientProfile>
+  ): PatientProfile {
+    const current = this.getProfile();
+
+    this.profile = {
+      ...current,
+      ...updates,
+      id: current.id,
+    };
+
     this.notify();
     return this.getProfile();
   }
 
-  public addContact(contact: Omit<EmergencyContact, 'id'>): EmergencyContact {
+  public addContact(
+    contact: Omit<EmergencyContact, 'id'>
+  ): EmergencyContact {
+    this.getProfile();
+
     const newContact: EmergencyContact = {
       ...contact,
-      id: `cnt-${Date.now().toString().slice(-4)}`,
+      id: crypto.randomUUID(),
     };
+
     this.profile.emergencyContacts.push(newContact);
     this.notify();
-    return newContact;
+
+    return clone(newContact);
   }
 
   public removeContact(contactId: string): boolean {
-    const prevLen = this.profile.emergencyContacts.length;
-    this.profile.emergencyContacts = this.profile.emergencyContacts.filter(
-      (c) => c.id !== contactId
-    );
-    this.notify();
-    return this.profile.emergencyContacts.length < prevLen;
+    this.getProfile();
+
+    const previousLength =
+      this.profile.emergencyContacts.length;
+
+    this.profile.emergencyContacts =
+      this.profile.emergencyContacts.filter(
+        (contact) => contact.id !== contactId
+      );
+
+    const removed =
+      this.profile.emergencyContacts.length <
+      previousLength;
+
+    if (removed) this.notify();
+
+    return removed;
   }
 
   public getActiveEmergency(): EmergencyRecord | null {
-    return this.activeEmergency ? JSON.parse(JSON.stringify(this.activeEmergency)) : null;
+    const patientId = this.currentPatientId();
+
+    if (!patientId) return null;
+
+    if (
+      this.activeEmergency &&
+      this.activeEmergency.reportedBy === 'PATIENT'
+    ) {
+      // The active record is scoped to the user
+      // through the confirmed emergency storage below.
+      const raw = (() => {
+        try {
+          return sessionStorage.getItem(CONFIRMED_KEY);
+        } catch {
+          return null;
+        }
+      })();
+
+      if (!raw) return null;
+
+      try {
+        const stored = JSON.parse(raw) as {
+          patientId?: string;
+        };
+
+        if (stored.patientId !== patientId) {
+          return null;
+        }
+      } catch {
+        return null;
+      }
+
+      return clone(this.activeEmergency);
+    }
+
+    this.restoreConfirmedEmergency(patientId);
+
+    return this.activeEmergency
+      ? clone(this.activeEmergency)
+      : null;
   }
 
   public getHistory(): EmergencyRecord[] {
-    return JSON.parse(JSON.stringify(this.history));
+    return clone(this.history);
   }
 
-  public async triggerSOS(payload: TriggerSOSPayload): Promise<{
-    success: boolean;
-    emergency?: EmergencyRecord;
-    error?: string;
-  }> {
-    if (this.activeEmergency) {
+  public async triggerSOS(
+    payload: TriggerSOSPayload
+  ): Promise<SOSResult> {
+    const patientId = this.currentPatientId();
+
+    if (!patientId) {
       return {
         success: false,
-        error: 'ACTIVE_EMERGENCY_EXISTS: An active emergency request is already in progress',
+        error: 'Sign in before submitting an SOS.',
       };
     }
 
-    if (!payload.location || !payload.location.address.trim()) {
+    if (this.getActiveEmergency()) {
       return {
         success: false,
-        error: 'MISSING_LOCATION: Accurate pickup location is required',
+        error:
+          'An emergency has already been confirmed. ' +
+          'Check its status before submitting another.',
       };
     }
 
-    // Safety rule: if MANUAL, ensure no fake coords
+    const input = payload.location;
+
+    if (!input || !['GPS', 'MANUAL'].includes(input.type)) {
+      return {
+        success: false,
+        error: 'A valid emergency location is required.',
+      };
+    }
+
     const location: EmergencyLocation = {
-      address: payload.location.address.trim(),
-      landmark: payload.location.landmark?.trim(),
-      type: payload.location.type,
-      coords: payload.location.type === 'GPS' ? payload.location.coords : undefined,
+      address: input.address?.trim() ?? '',
+      landmark: input.landmark?.trim(),
+      communityBase: input.communityBase?.trim(),
+      type: input.type,
+      coords: input.type === 'GPS' ? input.coords : undefined,
     };
 
-    const emergencyId = `emg-${Date.now().toString().slice(-5)}`;
-    const now = new Date().toISOString();
+    if (location.type === 'GPS') {
+      const lat = location.coords?.lat;
+      const lng = location.coords?.lng;
 
-    const emergency: EmergencyRecord = {
-      id: emergencyId,
-      state: 'DISPATCHING', // CREATED -> DISPATCHING immediately upon submission
-      severity: payload.severity || 'CRITICAL',
-      chiefComplaint: payload.chiefComplaint || 'Emergency SOS Alert',
-      reportedBy: 'PATIENT',
-      patientName: this.profile.fullName,
-      bloodGroup: this.profile.bloodGroup,
-      isAwake: 'Yes',
-      callerNote: payload.notes || 'Emergency SOS triggered via Patient Web Portal',
-      location,
-      destinationFacility: DEFAULT_FACILITY,
-      milestones: [
-        { state: 'CREATED', timestamp: now },
-        { state: 'DISPATCHING', timestamp: now, note: 'Broadcasting to nearest verified units' },
-      ],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    // Try backend
-    await apiClient.request('/emergencies', {
-      method: 'POST',
-      body: JSON.stringify(emergency),
-    });
-
-    this.activeEmergency = emergency;
-    this.notify();
-
-    return {
-      success: true,
-      emergency: JSON.parse(JSON.stringify(emergency)),
-    };
-  }
-
-  public async advanceState(nextState: EmergencyState, note?: string): Promise<{
-    success: boolean;
-    emergency?: EmergencyRecord;
-    error?: string;
-  }> {
-    if (!this.activeEmergency) {
-      return { success: false, error: 'No active emergency' };
-    }
-
-    const now = new Date().toISOString();
-    this.activeEmergency.state = nextState;
-    this.activeEmergency.updatedAt = now;
-    this.activeEmergency.milestones.push({
-      state: nextState,
-      timestamp: now,
-      note,
-    });
-
-    if (nextState === 'ACCEPTED' && !this.activeEmergency.assignedResponderName) {
-      this.activeEmergency.assignedResponderName = 'T. Adeleke';
-      this.activeEmergency.assignedVehicleType = 'Ambulance';
-      this.activeEmergency.assignedVehicleReg = 'ABJ-901-EK';
-      this.activeEmergency.etaMinutes = 7;
-    }
-
-    if (nextState === 'COMPLETED' || nextState === 'CANCELLED') {
-      this.history.unshift(JSON.parse(JSON.stringify(this.activeEmergency)));
-      this.activeEmergency = null;
-    }
-
-    this.notify();
-    return {
-      success: true,
-      emergency: this.activeEmergency ? JSON.parse(JSON.stringify(this.activeEmergency)) : undefined,
-    };
-  }
-
-  public async cancelEmergency(reason: string): Promise<{
-    success: boolean;
-    error?: string;
-  }> {
-    if (!this.activeEmergency) {
-      return { success: false, error: 'No active emergency to cancel' };
-    }
-
-    // Cancellation permitted only before patient is onboard
-    const allowedStates: EmergencyState[] = ['CREATED', 'DISPATCHING', 'ACCEPTED', 'PICKUP_ARRIVED'];
-    if (!allowedStates.includes(this.activeEmergency.state)) {
+      if (
+        typeof lat !== 'number' ||
+        typeof lng !== 'number' ||
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180
+      ) {
+        return {
+          success: false,
+          error: 'Valid GPS coordinates are required.',
+        };
+      }
+    } else if (
+      !location.address &&
+      !location.landmark &&
+      !location.communityBase
+    ) {
       return {
         success: false,
-        error: 'CANCELLATION_FORBIDDEN: Emergency cannot be cancelled once patient is onboard or journey has progressed to transit',
+        error:
+          'Enter a street address, landmark, or community.',
       };
     }
 
-    return this.advanceState('CANCELLED', reason || 'Cancelled by patient');
+    const requestBody = JSON.stringify({
+      source: location.type,
+      ...(location.type === 'GPS'
+        ? {
+          latitude: location.coords!.lat,
+          longitude: location.coords!.lng,
+        }
+        : {
+          streetAddress: location.address || undefined,
+          landmark: location.landmark || undefined,
+          villageCommunity:
+            location.communityBase || undefined,
+        }),
+      notes: [
+        payload.chiefComplaint,
+        payload.notes,
+      ]
+        .filter(Boolean)
+        .join(' - '),
+    });
+
+    if (this.pendingSOS) {
+      if (this.pendingSOS.patientId !== patientId) {
+        return {
+          success: false,
+          error:
+            'An unresolved SOS request belongs to another ' +
+            'signed-in patient in this browser tab. ' +
+            'Its outcome must be resolved first.',
+        };
+      }
+
+      if (this.pendingSOS.body !== requestBody) {
+        return {
+          success: false,
+          error:
+            'A previous SOS request may already have reached ' +
+            'the backend. Keep the original details until ' +
+            'its outcome is confirmed.',
+        };
+      }
+
+      const age = Date.now() - this.pendingSOS.createdAt;
+
+      if (
+        age < 0 ||
+        age >= IDEMPOTENCY_WINDOW_MS
+      ) {
+        return {
+          success: false,
+          error:
+            'The pending SOS request is outside the safe ' +
+            'retry window. Its status must be checked ' +
+            'before creating another request.',
+        };
+      }
+    } else {
+      this.pendingSOS = {
+        patientId,
+        key: this.generateSOSKey(),
+        body: requestBody,
+        createdAt: Date.now(),
+      };
+
+      try {
+        this.savePendingSOS();
+      } catch {
+        this.pendingSOS = null;
+
+        return {
+          success: false,
+          error:
+            'Unable to preserve the SOS request safely. ' +
+            'Check browser storage and try again.',
+        };
+      }
+    }
+
+    const pending = this.pendingSOS;
+
+    if (!pending) {
+      return {
+        success: false,
+        error: 'Unable to prepare the SOS request.',
+      };
+    }
+
+    try {
+      const response =
+        await apiClient.request<BackendCreateEmergencyResponse>(
+          '/emergencies',
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': pending.key,
+            },
+            body: pending.body,
+          }
+        );
+
+      if (!response.success) {
+        return {
+          success: false,
+          error:
+            response.error ||
+            'SOS was not confirmed. Please check the request status.',
+        };
+      }
+
+      if (!response.data) {
+        return {
+          success: false,
+          error:
+            'The backend response did not contain emergency details. ' +
+            'The request outcome must be verified before retrying.',
+        };
+      }
+
+      const data = response.data;
+
+      if (
+        typeof data.id !== 'string' ||
+        !data.id ||
+        !['CREATED', 'DISPATCHING'].includes(data.state) ||
+        data.locationSource !== location.type ||
+        typeof data.createdAt !== 'string' ||
+        !Number.isFinite(Date.parse(data.createdAt))
+      ) {
+        return {
+          success: false,
+          error:
+            'The backend returned an unexpected emergency ' +
+            'response. Its outcome must be verified.',
+        };
+      }
+
+      const emergency: EmergencyRecord = {
+        id: data.id,
+        state: data.state,
+        severity: payload.severity ?? 'CRITICAL',
+        chiefComplaint:
+          payload.chiefComplaint || 'Emergency SOS',
+        reportedBy: 'PATIENT',
+        patientName:
+          authService.getCurrentSession().user?.fullName,
+        callerNote: payload.notes,
+        location,
+        milestones: [
+          {
+            state: data.state,
+            timestamp: data.createdAt,
+          },
+        ],
+        createdAt: data.createdAt,
+        updatedAt: data.createdAt,
+      };
+
+      this.activeEmergency = emergency;
+      this.saveConfirmedEmergency(patientId, emergency);
+      this.clearPendingSOS();
+      this.notify();
+
+      return {
+        success: true,
+        emergency: clone(emergency),
+      };
+    } catch {
+      return {
+        success: false,
+        error:
+          'SOS confirmation could not be obtained. ' +
+          'The request may have reached the backend. ' +
+          'Retry only with the original request details.',
+      };
+    }
   }
 
-  public resetToFixtures() {
-    this.profile = JSON.parse(JSON.stringify(INITIAL_PATIENT));
+  public async advanceState(
+    _nextState: EmergencyState,
+    _note?: string
+  ): Promise<SOSResult> {
+    return {
+      success: false,
+      error:
+        'Emergency state changes must be confirmed by ' +
+        'the backend. Local simulation is disabled.',
+    };
+  }
+
+  public async cancelEmergency(
+    _reason: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    return {
+      success: false,
+      error:
+        'Emergency cancellation is not connected to ' +
+        'the backend yet. Contact emergency support ' +
+        'rather than assuming cancellation succeeded.',
+    };
+  }
+
+  public resetToFixtures(): void {
+    // Legacy compatibility for existing tests.
+    // No fictional patient or emergency data is loaded.
     this.activeEmergency = null;
+    this.history = [];
     this.notify();
   }
 }
