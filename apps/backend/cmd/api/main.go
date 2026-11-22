@@ -331,6 +331,11 @@ func run() error {
 	responderService := responder.NewService(responderRepository)
 	responderHandler := responder.NewHandler(responderService)
 
+	corsConfig, err := config.LoadCORSConfig()
+	if err != nil {
+		return fmt.Errorf("load CORS configuration: %w", err)
+	}
+
 	// 6. Construct the application router.
 	router, err := httpapi.NewRouter(
 		authenticator,
@@ -351,7 +356,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           router,
+		Handler:           httpapi.CORSMiddleware(corsConfig.AllowedOrigins)(router),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
