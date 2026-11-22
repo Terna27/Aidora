@@ -1,18 +1,17 @@
+
 /**
- * Unified API Client for Aidline Web Application
- * Connects to Go backend (VITE_API_BASE_URL) with robust mock/offline fallback
+ * Unified API Client for Aidora Web Application
+ * Connects to the Go backend with network error handling.
  */
 
 const getApiBaseUrl = (): string => {
   try {
-    // Vite browser injection
-    // @ts-expect-error import.meta.env may not be typed in all test runners
-    if (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_API_BASE_URL) {
-      // @ts-expect-error import.meta.env
+    // Vite environment
+    if (import.meta.env?.VITE_API_BASE_URL) {
       return import.meta.env.VITE_API_BASE_URL;
     }
   } catch {
-    // fall through
+    // Fall through to other configuration
   }
 
   try {
@@ -20,19 +19,25 @@ const getApiBaseUrl = (): string => {
       return process.env.VITE_API_BASE_URL;
     }
   } catch {
-    // fall through
+    // Fall through
   }
 
   return 'http://localhost:8080/api/v1';
 };
 
-const API_BASE_URL = getApiBaseUrl();
+const API_BASE_URL = getApiBaseUrl().replace(/\/+$/, '');
 
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
-  source: 'BACKEND' | 'FIXTURE';
+  errorCode?: string;
+  source: 'BACKEND' | 'NETWORK_ERROR';
+}
+
+interface BackendError {
+  code?: string;
+  message?: string;
 }
 
 class ApiClient {
@@ -44,7 +49,7 @@ class ApiClient {
     this.baseUrl = API_BASE_URL;
   }
 
-  public setToken(token: string | null) {
+  public setToken(token: string | null): void {
     this.token = token;
   }
 
@@ -54,14 +59,21 @@ class ApiClient {
 
   public async checkBackendHealth(): Promise<boolean> {
     try {
+      const healthUrl = `${new URL(this.baseUrl).origin}/health`;
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 800);
-      const res = await fetch(`${this.baseUrl}/health`, {
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      this.isOnline = res.ok;
-      return res.ok;
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      try {
+        const response = await fetch(healthUrl, {
+          signal: controller.signal,
+        });
+
+        this.isOnline = response.ok;
+        return response.ok;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     } catch {
       this.isOnline = false;
       return false;
@@ -76,52 +88,122 @@ class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    // If backend is known to be offline, return immediately without blocking UI
-    if (this.isOnline === false) {
-      return { success: false, error: 'Backend offline', source: 'FIXTURE' };
-    }
-
     const url = `${this.baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
-    };
+
+    const headers = new Headers(options.headers);
+    headers.set('Accept', 'application/json');
+
+    if (options.body && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
 
     if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+      headers.set('Authorization', `Bearer ${this.token}`);
     }
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1000);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
+    try {
       const response = await fetch(url, {
         ...options,
         headers,
         signal: controller.signal,
       });
-      clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMsg = `Server error (${response.status})`;
+      const responseText = await response.text();
+
+      let parsed: unknown = undefined;
+
+      if (responseText.trim()) {
         try {
-          const parsed = JSON.parse(errorText);
-          errorMsg = parsed.error || parsed.message || errorMsg;
+          parsed = JSON.parse(responseText);
         } catch {
-          // not JSON
+          parsed = responseText;
         }
-        return { success: false, error: errorMsg, source: 'BACKEND' };
       }
 
-      const data = (await response.json()) as T;
+      if (!response.ok) {
+        const errorPayload = parsed as
+          | { error?: string | BackendError; message?: string }
+          | undefined;
+
+        const backendError = errorPayload?.error;
+
+        let errorMessage = `Request failed (${response.status})`;
+        let errorCode: string | undefined;
+
+        if (typeof backendError === 'string') {
+          errorMessage = backendError;
+        } else if (backendError && typeof backendError === 'object') {
+          errorMessage = backendError.message || errorMessage;
+          errorCode = backendError.code;
+        } else if (errorPayload?.message) {
+          errorMessage = errorPayload.message;
+        }
+
+        this.isOnline = true;
+
+        return {
+          success: false,
+          error: errorMessage,
+          errorCode,
+          source: 'BACKEND',
+        };
+      }
+
       this.isOnline = true;
-      return { success: true, data, source: 'BACKEND' };
+
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        !('success' in parsed) ||
+        typeof parsed.success !== 'boolean'
+      ) {
+        return {
+          success: false,
+          error: 'Invalid response received from the backend.',
+          source: 'BACKEND',
+        };
+      }
+
+      const envelope = parsed as {
+        success: boolean;
+        data?: T;
+        error?: BackendError;
+      };
+
+      if (!envelope.success) {
+        return {
+          success: false,
+          error: envelope.error?.message || 'Backend request failed.',
+          errorCode: envelope.error?.code,
+          source: 'BACKEND',
+        };
+      }
+
+      return {
+        success: true,
+        data: envelope.data,
+        source: 'BACKEND',
+      };
     } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.name === 'AbortError'
+            ? 'The request timed out. Please try again.'
+            : err.message
+          : 'Network error. Please check your connection.';
+
       this.isOnline = false;
-      const message = err instanceof Error ? err.message : 'Network error';
-      return { success: false, error: message, source: 'FIXTURE' };
+
+      return {
+        success: false,
+        error: message,
+        source: 'NETWORK_ERROR',
+      };
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }

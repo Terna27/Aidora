@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../services/apiClient';
 
 export const PortalNavbar: React.FC = () => {
-  const { session, logout, isMockMode } = useAuth();
+  const { session, logout } = useAuth();
   const navigate = useNavigate();
   const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
 
@@ -194,20 +194,6 @@ export const PortalNavbar: React.FC = () => {
           >
             {isBackendOnline ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
             <span>{isBackendOnline ? 'API Online' : 'Telemetry Fixture'}</span>
-          </div>
-
-          <div
-            style={{
-              padding: '2px 7px',
-              borderRadius: '10px',
-              backgroundColor: isMockMode ? 'rgba(59, 130, 246, 0.15)' : 'rgba(18, 183, 106, 0.15)',
-              color: isMockMode ? '#60a5fa' : '#34d399',
-              fontSize: '10.5px',
-              fontWeight: 600,
-            }}
-            title={isMockMode ? 'Mock Auth Active: Identities are local test fixtures' : 'Production Auth Active'}
-          >
-            {isMockMode ? 'Mock Auth' : 'Prod Auth'}
           </div>
         </div>
 

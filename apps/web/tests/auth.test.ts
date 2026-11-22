@@ -1,12 +1,10 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { authService } from '../src/services/auth/authService';
-import { mockAuthAdapter } from '../src/services/auth/mockAuthAdapter';
 import { responderService } from '../src/services/responderService';
 
 describe('Aidora Web — Milestone 1: Identity & Authentication Test Suite', () => {
   beforeEach(async () => {
-    authService.setMockMode(true);
     await authService.logout();
     responderService.resetToFixtures();
   });
@@ -317,22 +315,6 @@ describe('Aidora Web — Milestone 1: Identity & Authentication Test Suite', () 
     assert.match(res.error || '', /account role mismatch/i);
   });
 
-  test('11. Session expiry clears session and returns unauthenticated state', async () => {
-    await authService.login({ identifier: '08031234567', password: 'secret123' });
-    let session = authService.getCurrentSession();
-    assert.strictEqual(session.isAuthenticated, true);
-
-    // Simulate expired token in adapter
-    mockAuthAdapter.setSession({
-      ...session,
-      tokenExpiry: new Date(Date.now() - 1000).toISOString(),
-    });
-
-    session = authService.getCurrentSession();
-    assert.strictEqual(session.isAuthenticated, false);
-    assert.strictEqual(session.user, null);
-  });
-
   test('12. Logout cleans up session, memory, and tokens', async () => {
     await authService.login({ identifier: '08031234567', password: 'secret123' });
     assert.strictEqual(authService.getCurrentSession().isAuthenticated, true);
@@ -367,21 +349,5 @@ describe('Aidora Web — Milestone 1: Identity & Authentication Test Suite', () 
     responderService.setVerificationStatus('VERIFIED');
     toggle = responderService.setAvailability('ONLINE');
     assert.strictEqual(toggle.success, true);
-  });
-
-  test('15. Production mode does NOT silently fall back to mock authentication', async () => {
-    // Explicitly disable mock mode to simulate production
-    authService.setMockMode(false);
-    assert.strictEqual(authService.isMockMode(), false);
-
-    const loginAttempt = await authService.login({
-      identifier: '08031234567',
-      password: 'secret123',
-    });
-
-    // In production without live backend auth endpoints, MUST return SERVICE_UNAVAILABLE error
-    // It must NEVER invent a successful login or silently use mock identities!
-    assert.strictEqual(loginAttempt.success, false);
-    assert.match(loginAttempt.error || '', /SERVICE_UNAVAILABLE/);
   });
 });

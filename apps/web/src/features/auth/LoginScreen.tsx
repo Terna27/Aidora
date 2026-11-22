@@ -4,16 +4,16 @@ import { useAuth } from '../../context/AuthContext';
 import { FormField } from '../../components/forms/FormField';
 import { PasswordInput } from '../../components/forms/PasswordInput';
 import { UserRole } from '../../types/auth';
-import { AlertCircle, Lock, Sparkles } from 'lucide-react';
+import { AlertCircle, Lock } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
-  const { login, isMockMode, loading } = useAuth();
+  const { login, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [targetRole, setTargetRole] = useState<UserRole | undefined>(undefined);
+  const targetRole: UserRole | undefined = undefined;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || null;
@@ -62,27 +62,6 @@ export const LoginScreen: React.FC = () => {
       setErrorMessage(res.error || 'Authentication failed. Please verify credentials.');
     }
   };
-
-  // Quick helper for development fixture fast-track
-  const handleFastTrack = async (testId: string, role: UserRole) => {
-    setIdentifier(testId);
-    setPassword('secret123');
-    setTargetRole(role);
-    setErrorMessage(null);
-
-    const res = await login({
-      identifier: testId,
-      password: 'secret123',
-      targetRole: role,
-    });
-
-    if (res.success && res.session?.user) {
-      navigate(getRoleDestination(res.session.user.role), { replace: true });
-    } else {
-      setErrorMessage(res.error || 'Fast-track failed');
-    }
-  };
-
   return (
     <div
       style={{
@@ -262,117 +241,6 @@ export const LoginScreen: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Development Fixture Fast-Track Banner (Only shown in mock mode) */}
-      {isMockMode && (
-        <div
-          style={{
-            width: '440px',
-            maxWidth: '100%',
-            marginTop: '16px',
-            backgroundColor: '#ffffff',
-            borderRadius: '8px',
-            border: '1px dashed #d0d5dd',
-            padding: '12px 14px',
-            boxSizing: 'border-box',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-            <Sparkles size={14} color="#f79009" />
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#344054', textTransform: 'uppercase' }}>
-              Development Test Identities (Fast-Track)
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
-            <button
-              onClick={() => handleFastTrack('08031234567', 'PATIENT')}
-              style={{
-                padding: '6px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                border: '1px solid #e4e7ec',
-                backgroundColor: '#f8fafc',
-                textAlign: 'left',
-              }}
-            >
-              🤰 <strong>Patient</strong> (Amina)
-            </button>
-
-            <button
-              onClick={() => handleFastTrack('08025557890', 'RESPONDER')}
-              style={{
-                padding: '6px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                border: '1px solid #e4e7ec',
-                backgroundColor: '#f8fafc',
-                textAlign: 'left',
-              }}
-            >
-              🏍️ <strong>Responder</strong> (Verified)
-            </button>
-
-            <button
-              onClick={() => handleFastTrack('08021112233', 'RESPONDER')}
-              style={{
-                padding: '6px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                border: '1px solid #e4e7ec',
-                backgroundColor: '#fffbeb',
-                color: '#b45309',
-                textAlign: 'left',
-              }}
-            >
-              🚗 <strong>Responder</strong> (Pending)
-            </button>
-
-            <button
-              onClick={() => handleFastTrack('08009990001', 'HOSPITAL_ADMIN')}
-              style={{
-                padding: '6px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                border: '1px solid #e4e7ec',
-                backgroundColor: '#f8fafc',
-                textAlign: 'left',
-              }}
-            >
-              🏥 <strong>Hospital</strong> (Approved)
-            </button>
-
-            <button
-              onClick={() => handleFastTrack('08093334444', 'HOSPITAL_ADMIN')}
-              style={{
-                padding: '6px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                border: '1px solid #e4e7ec',
-                backgroundColor: '#fffbeb',
-                color: '#b45309',
-                textAlign: 'left',
-              }}
-            >
-              🏥 <strong>Hospital</strong> (Pending)
-            </button>
-
-            <button
-              onClick={() => handleFastTrack('08077778899', 'DISPATCHER')}
-              style={{
-                padding: '6px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                border: '1px solid #e4e7ec',
-                backgroundColor: '#f8fafc',
-                textAlign: 'left',
-              }}
-            >
-              📻 <strong>Dispatcher</strong> (N. Eze)
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

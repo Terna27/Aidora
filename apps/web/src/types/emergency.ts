@@ -79,3 +79,10 @@ export interface EmergencyRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface BackendCreateEmergencyResponse {
+  id: string;
+  state: EmergencyState;
+  locationSource: 'GPS' | 'MANUAL';
+  createdAt: string;
+}
