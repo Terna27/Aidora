@@ -16,6 +16,8 @@ func setValidDeliveryEnvironment(t *testing.T) {
 	t.Setenv("AFRICASTALKING_USERNAME", "sandbox")
 	t.Setenv("AFRICASTALKING_API_KEY", "test-api-key")
 	t.Setenv("AFRICASTALKING_SENDER_ID", "AIDORA")
+	t.Setenv("AUTH_EMAIL_ENABLED", "true")
+	t.Setenv("AUTH_SMS_ENABLED", "true")
 }
 
 func TestLoadAuthDeliveryConfig(t *testing.T) {
@@ -69,5 +71,70 @@ func TestLoadAuthDeliveryConfigDefaultsSMTPPort(t *testing.T) {
 	}
 	if cfg.SMTPPort != 587 {
 		t.Fatalf("SMTPPort = %d, want 587", cfg.SMTPPort)
+	}
+}
+
+func TestLoadAuthDeliveryConfigEmailOnly(t *testing.T) {
+	setValidDeliveryEnvironment(t)
+
+	t.Setenv("AUTH_SMS_ENABLED", "false")
+	t.Setenv("AFRICASTALKING_USERNAME", "")
+	t.Setenv("AFRICASTALKING_API_KEY", "")
+
+	cfg, err := LoadAuthDeliveryConfig()
+	if err != nil {
+		t.Fatalf("email-only configuration failed: %v", err)
+	}
+
+	if !cfg.EmailEnabled || cfg.SMSEnabled {
+		t.Fatal("expected email enabled and SMS disabled")
+	}
+}
+
+func TestLoadAuthDeliveryConfigSMSOnly(t *testing.T) {
+	setValidDeliveryEnvironment(t)
+
+	t.Setenv("AUTH_EMAIL_ENABLED", "false")
+	t.Setenv("SMTP_HOST", "")
+	t.Setenv("SMTP_USERNAME", "")
+	t.Setenv("SMTP_PASSWORD", "")
+	t.Setenv("SMTP_FROM_EMAIL", "")
+
+	cfg, err := LoadAuthDeliveryConfig()
+	if err != nil {
+		t.Fatalf("SMS-only configuration failed: %v", err)
+	}
+
+	if cfg.EmailEnabled || !cfg.SMSEnabled {
+		t.Fatal("expected SMS enabled and email disabled")
+	}
+}
+
+func TestLoadAuthDeliveryConfigRejectsBothDisabled(t *testing.T) {
+	setValidDeliveryEnvironment(t)
+
+	t.Setenv("AUTH_EMAIL_ENABLED", "false")
+	t.Setenv("AUTH_SMS_ENABLED", "false")
+
+	_, err := LoadAuthDeliveryConfig()
+	if !errors.Is(err, ErrInvalidAuthDeliveryConfig) {
+		t.Fatalf("expected invalid configuration, got %v", err)
+	}
+}
+
+func TestLoadAuthDeliveryConfigRejectsMissingChannelFlags(t *testing.T) {
+	for _, variable := range []string{
+		"AUTH_EMAIL_ENABLED",
+		"AUTH_SMS_ENABLED",
+	} {
+		t.Run(variable, func(t *testing.T) {
+			setValidDeliveryEnvironment(t)
+			t.Setenv(variable, "")
+
+			_, err := LoadAuthDeliveryConfig()
+			if !errors.Is(err, ErrInvalidAuthDeliveryConfig) {
+				t.Fatalf("expected invalid configuration, got %v", err)
+			}
+		})
 	}
 }

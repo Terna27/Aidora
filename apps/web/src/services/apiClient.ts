@@ -4,25 +4,34 @@
  * Connects to the Go backend with network error handling.
  */
 
+// const getApiBaseUrl = (): string => {
+//   try {
+//     // Vite environment
+//     if (import.meta.env?.VITE_API_BASE_URL) {
+//       return import.meta.env.VITE_API_BASE_URL;
+//     }
+//   } catch {
+//     // Fall through to other configuration
+//   }
+
+//   try {
+//     if (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL) {
+//       return process.env.VITE_API_BASE_URL;
+//     }
+//   } catch {
+//     // Fall through
+//   }
+
 const getApiBaseUrl = (): string => {
-  try {
-    // Vite environment
-    if (import.meta.env?.VITE_API_BASE_URL) {
-      return import.meta.env.VITE_API_BASE_URL;
-    }
-  } catch {
-    // Fall through to other configuration
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+
+  if (!configuredUrl) {
+    throw new Error(
+      'VITE_API_BASE_URL is required. Configure the backend API URL.'
+    );
   }
 
-  try {
-    if (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL) {
-      return process.env.VITE_API_BASE_URL;
-    }
-  } catch {
-    // Fall through
-  }
-
-  return 'http://localhost:8080/api/v1';
+  return configuredUrl;
 };
 
 const API_BASE_URL = getApiBaseUrl().replace(/\/+$/, '');

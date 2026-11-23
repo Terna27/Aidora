@@ -46,6 +46,7 @@ func NewSenderWithHTTPClient(cfg config.AuthDeliveryConfig, client *http.Client)
 
 // SendVerificationCode implements auth.VerificationCodeSender without importing
 // the auth package, avoiding a package dependency cycle.
+
 func (s *Sender) SendVerificationCode(
 	ctx context.Context,
 	channel string,
@@ -56,13 +57,25 @@ func (s *Sender) SendVerificationCode(
 	if s == nil {
 		return errors.New("notification sender is nil")
 	}
+
 	switch strings.ToLower(strings.TrimSpace(channel)) {
 	case "email":
+		if !s.config.EmailEnabled {
+			return errors.New("email delivery is disabled")
+		}
 		return s.sendEmail(ctx, destination, purpose, code)
+
 	case "phone":
+		if !s.config.SMSEnabled {
+			return errors.New("SMS delivery is disabled")
+		}
 		return s.sendSMS(ctx, destination, purpose, code)
+
 	default:
-		return fmt.Errorf("unsupported notification channel %q", channel)
+		return fmt.Errorf(
+			"unsupported notification channel %q",
+			channel,
+		)
 	}
 }
 

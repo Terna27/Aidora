@@ -14,10 +14,18 @@ import (
 
 func testConfig() config.AuthDeliveryConfig {
 	return config.AuthDeliveryConfig{
-		SMTPHost: "smtp.example.test", SMTPPort: 587,
-		SMTPUsername: "aidora", SMTPPassword: "secret",
-		SMTPFromEmail: "no-reply@example.test", SMTPFromName: "AIDORA",
-		AfricaTalkingUsername: "sandbox", AfricaTalkingAPIKey: "test-key",
+		EmailEnabled: true,
+		SMSEnabled:   true,
+
+		SMTPHost:      "smtp.example.test",
+		SMTPPort:      587,
+		SMTPUsername:  "aidora",
+		SMTPPassword:  "secret",
+		SMTPFromEmail: "no-reply@example.test",
+		SMTPFromName:  "AIDORA",
+
+		AfricaTalkingUsername: "sandbox",
+		AfricaTalkingAPIKey:   "test-key",
 		AfricaTalkingSenderID: "AIDORA",
 	}
 }
@@ -94,5 +102,32 @@ func TestSendSMSRejectsNonSuccessHTTPStatus(t *testing.T) {
 	err := sender.SendVerificationCode(context.Background(), "phone", "+2348012345678", "verify_phone", "123456")
 	if err == nil || !strings.Contains(err.Error(), "HTTP status 401") {
 		t.Fatalf("expected HTTP status error, got %v", err)
+	}
+}
+
+func TestSendSMSDisabled(t *testing.T) {
+	cfg := testConfig()
+	cfg.SMSEnabled = false
+
+	if cfg.SMSEnabled {
+		t.Fatal("SMS must be disabled for this test")
+	}
+
+	sender := NewSender(cfg)
+
+	err := sender.SendVerificationCode(
+		context.Background(),
+		"phone",
+		"+2348012345678",
+		"verify_phone",
+		"123456",
+	)
+
+	if err == nil {
+		t.Fatal("expected SMS delivery to be rejected")
+	}
+
+	if !strings.Contains(err.Error(), "SMS delivery is disabled") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
