@@ -2,9 +2,11 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"testing"
@@ -129,5 +131,79 @@ func TestSendSMSDisabled(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "SMS delivery is disabled") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSMTPAuthenticationError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "invalid credentials",
+			err: &textproto.Error{
+				Code: 535,
+				Msg:  "Authentication rejected",
+			},
+			want: "server status 535",
+		},
+		{
+			name: "IP authorization restriction",
+			err: &textproto.Error{
+				Code: 525,
+				Msg:  "Unauthorized IP address",
+			},
+			want: "server status 525",
+		},
+		{
+			name: "temporary authentication failure",
+			err: &textproto.Error{
+				Code: 454,
+				Msg:  "Temporary failure",
+			},
+			want: "server status 454",
+		},
+		{
+			name: "unexpected connection closure",
+			err:  io.EOF,
+			want: "connection closed unexpectedly",
+		},
+		{
+			name: "unknown authentication error",
+			err:  errors.New("unknown error"),
+			want: "SMTP authentication failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := smtpAuthenticationError(tt.err)
+
+			if !strings.Contains(got.Error(), tt.want) {
+				t.Errorf(
+					"got %q, want error containing %q",
+					got.Error(),
+					tt.want,
+				)
+			}
+		})
+	}
+}
+
+func TestSMTPAuthenticationErrorDoesNotExposeProviderMessage(
+	t *testing.T,
+) {
+	sensitiveMessage := "example-sensitive-provider-content"
+
+	err := &textproto.Error{
+		Code: 535,
+		Msg:  sensitiveMessage,
+	}
+
+	got := smtpAuthenticationError(err)
+
+	if strings.Contains(got.Error(), sensitiveMessage) {
+		t.Fatal("SMTP authentication error exposed provider message")
 	}
 }

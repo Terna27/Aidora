@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -137,8 +138,9 @@ func (s *Sender) sendEmail(ctx context.Context, destination, purpose, code strin
 	}
 
 	auth := smtp.PlainAuth("", s.config.SMTPUsername, s.config.SMTPPassword, s.config.SMTPHost)
+
 	if err := client.Auth(auth); err != nil {
-		return errors.New("SMTP authentication failed")
+		return smtpAuthenticationError(err)
 	}
 	if err := client.Mail(from.Address); err != nil {
 		return fmt.Errorf("set SMTP sender: %w", err)
@@ -171,6 +173,39 @@ type africaTalkingResponse struct {
 			MessageID  string `json:"messageId"`
 		} `json:"Recipients"`
 	} `json:"SMSMessageData"`
+}
+
+// smtpAuthenticationError preserves safe diagnostic information
+// without exposing SMTP credentials or raw provider responses.
+func smtpAuthenticationError(err error) error {
+	var smtpErr *textproto.Error
+
+	if errors.As(err, &smtpErr) {
+		return fmt.Errorf(
+			"SMTP authentication failed (server status %d)",
+			smtpErr.Code,
+		)
+	}
+
+	var netErr net.Error
+
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return errors.New(
+			"SMTP authentication failed: connection timed out",
+		)
+	}
+
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return errors.New(
+			"SMTP authentication failed: connection closed unexpectedly",
+		)
+	}
+
+	return fmt.Errorf(
+		"SMTP authentication failed (error type: %T)",
+		err,
+	)
 }
 
 func (s *Sender) sendSMS(ctx context.Context, destination, purpose, code string) error {
